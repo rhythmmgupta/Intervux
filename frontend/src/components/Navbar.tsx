@@ -1,110 +1,102 @@
 import React from 'react';
-import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ApiService } from '../services/api';
-import { Video, BarChart2, History, LogOut, User as UserIcon, Sparkles } from 'lucide-react';
+import { LogOut } from 'lucide-react';
+
+const CANDIDATE_LINKS = [
+  { to: '/dashboard', label: 'Dashboard' },
+  { to: '/setup', label: 'New session' },
+  { to: '/contests', label: 'Contests' },
+  { to: '/speaking', label: 'Speaking' },
+  { to: '/scoreboard', label: 'Scoreboard' },
+  { to: '/history', label: 'History' },
+];
+
+const HR_LINKS = [
+  { to: '/hr', label: 'Candidates' },
+  { to: '/contests', label: 'Contests' },
+  { to: '/scoreboard', label: 'Scoreboard' },
+];
 
 export const Navbar: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const user = ApiService.getCurrentStoredUser();
+  const links = user?.role === 'hr' ? HR_LINKS : CANDIDATE_LINKS;
 
   const handleLogout = () => {
     ApiService.removeToken();
     navigate('/login');
   };
 
-  const isActive = (path: string) => location.pathname === path;
-
   return (
-    <header className="sticky top-0 z-50 bg-slate-900/90 backdrop-blur-md border-b border-slate-800">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-        {/* Brand */}
-        <Link to={user ? '/dashboard' : '/'} className="flex items-center gap-3 group">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-purple-500 flex items-center justify-center text-white shadow-lg shadow-indigo-500/20 group-hover:scale-105 transition-transform">
-            <Video className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="flex items-center gap-1.5">
-              <span className="font-bold text-xl tracking-tight text-white">IntervuX</span>
-              <span className="text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                AI MVP
-              </span>
-            </div>
-            <p className="text-[11px] text-slate-400 hidden sm:block">AI-Powered Interview Companion</p>
-          </div>
+    <header className="sticky top-0 z-50 bg-ink/95 backdrop-blur-sm border-b border-line">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 h-14 flex items-center gap-6">
+        {/* The mark is the product: a level meter at rest. */}
+        <Link to={user ? (user.role === 'hr' ? '/hr' : '/dashboard') : '/'} className="flex items-center gap-2.5 shrink-0">
+          <span className="flex items-end gap-[2px] h-5" aria-hidden="true">
+            <span className="w-[3px] h-2 bg-sodium-600" />
+            <span className="w-[3px] h-3.5 bg-sodium-500" />
+            <span className="w-[3px] h-5 bg-sodium-400" />
+            <span className="w-[3px] h-3 bg-good-500" />
+          </span>
+          <span className="signage text-lg text-chalk">IntervuX</span>
         </Link>
 
-        {/* Center Nav for Logged In Users */}
         {user && (
-          <nav className="hidden md:flex items-center gap-1">
-            <Link
-              to="/dashboard"
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-colors ${
-                isActive('/dashboard')
-                  ? 'bg-indigo-600/15 text-indigo-400 border border-indigo-500/20'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-              }`}
-            >
-              <BarChart2 className="w-4 h-4" />
-              Dashboard
-            </Link>
-            <Link
-              to="/setup"
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-colors ${
-                isActive('/setup')
-                  ? 'bg-indigo-600/15 text-indigo-400 border border-indigo-500/20'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-              }`}
-            >
-              <Sparkles className="w-4 h-4" />
-              New Interview
-            </Link>
-            <Link
-              to="/history"
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-colors ${
-                isActive('/history')
-                  ? 'bg-indigo-600/15 text-indigo-400 border border-indigo-500/20'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-              }`}
-            >
-              <History className="w-4 h-4" />
-              History
-            </Link>
+          <nav className="hidden md:flex items-center gap-1 flex-1 min-w-0">
+            {links.map((link) => {
+              const active = location.pathname === link.to;
+              return (
+                <Link
+                  key={link.to}
+                  to={link.to}
+                  className={`px-3 py-1.5 text-sm rounded-control transition-colors ${
+                    active
+                      ? 'text-sodium-300 bg-sodium-600/10 border border-sodium-600/40'
+                      : 'text-mute hover:text-chalk border border-transparent'
+                  }`}
+                >
+                  {link.label}
+                </Link>
+              );
+            })}
           </nav>
         )}
 
-        {/* Right Section */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 ml-auto shrink-0">
           {user ? (
-            <div className="flex items-center gap-3">
-              <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800/80 border border-slate-700/60 text-xs text-slate-300">
-                <UserIcon className="w-3.5 h-3.5 text-indigo-400" />
-                <span className="font-medium text-slate-200">{user.name}</span>
+            <>
+              <div className="hidden sm:block text-right leading-tight">
+                <p className="text-xs text-chalk">{user.name}</p>
+                <p className="text-[11px] text-mute">
+                  {user.role === 'hr'
+                    ? `Recruiting${user.target_company ? ` for ${user.target_company}` : ''}`
+                    : user.target_company
+                    ? `Targeting ${user.target_company}`
+                    : 'No target set'}
+                </p>
               </div>
               <button
                 onClick={handleLogout}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                title="Log Out"
+                className="p-2 text-mute hover:text-peak-300 transition-colors rounded-control"
+                title="Log out"
               >
                 <LogOut className="w-4 h-4" />
-                <span className="hidden sm:inline">Logout</span>
               </button>
-            </div>
+            </>
           ) : (
-            <div className="flex items-center gap-2">
-              <Link
-                to="/login"
-                className="px-4 py-2 rounded-lg text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
-              >
-                Sign In
+            <>
+              <Link to="/login" className="px-3 py-1.5 text-sm text-mute hover:text-chalk transition-colors">
+                Sign in
               </Link>
               <Link
                 to="/register"
-                className="px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm transition-colors"
+                className="px-3.5 py-1.5 text-sm font-semibold bg-sodium-500 hover:bg-sodium-400 text-ink rounded-control transition-colors"
               >
-                Get Started
+                Create account
               </Link>
-            </div>
+            </>
           )}
         </div>
       </div>

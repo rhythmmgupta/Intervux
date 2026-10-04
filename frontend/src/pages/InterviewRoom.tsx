@@ -5,10 +5,12 @@ import { Interview, Question } from '../types';
 import { useCamera } from '../hooks/useCamera';
 import { useMicrophone } from '../hooks/useMicrophone';
 import { useInterviewSocket } from '../hooks/useInterviewSocket';
+import { useProctor } from '../hooks/useProctor';
 import { CameraPreview } from '../components/CameraPreview';
 import { InterviewQuestion } from '../components/InterviewQuestion';
 import { LiveMetrics } from '../components/LiveMetrics';
 import { FeedbackCard } from '../components/FeedbackCard';
+import { Chip, Meter } from '../components/Meter';
 import {
   Clock,
   Play,
@@ -19,6 +21,11 @@ import {
   CheckCircle2,
   AlertCircle,
   Sparkles,
+  ShieldCheck,
+  ShieldAlert,
+  Users,
+  Eye,
+  Activity,
 } from 'lucide-react';
 
 export const InterviewRoom: React.FC = () => {
@@ -70,7 +77,7 @@ export const InterviewRoom: React.FC = () => {
     duration: answerDuration,
     startMicrophone,
     stopMicrophone,
-    setTranscript,
+    resetTranscript,
   } = useMicrophone();
 
   // 2. WebSocket Hook
@@ -79,9 +86,11 @@ export const InterviewRoom: React.FC = () => {
     connectionStatus,
     currentQuestion: wsQuestion,
     liveMetrics,
+    integrity,
     coachingTip,
     lastQuestionFeedback,
     sendVideoFrame,
+    sendIntegrityEvent,
     sendAudioChunk,
     completeQuestion,
     requestCompleteInterview,
@@ -95,6 +104,12 @@ export const InterviewRoom: React.FC = () => {
       setIsEvaluating(false);
       setFeedbackDialog(null);
     },
+  });
+
+  // 3. Session Integrity Watcher (browser environment signals)
+  const { localFlags, enterLockdown } = useProctor({
+    active: isAnswering,
+    onEvent: sendIntegrityEvent,
   });
 
   // Load Interview data from backend API
@@ -132,30 +147,41 @@ export const InterviewRoom: React.FC = () => {
     }
   }, [wsQuestion, interview]);
 
-  // Periodic frame sampling loop (sends 1 sampled JPEG frame every 1.5 seconds during answer)
+  // Live telemetry changes many times a second. Reading it through a ref keeps the
+  // sampling intervals below from being torn down and rebuilt on every tick.
+  const telemetryRef = useRef({ speakingSpeed, volume, transcript, isAnswering });
   useEffect(() => {
-    if (!isAnswering || camStatus !== 'active') return;
+    telemetryRef.current = { speakingSpeed, volume, transcript, isAnswering };
+  }, [speakingSpeed, volume, transcript, isAnswering]);
+
+  // Sample a frame every 1.5s for as long as the camera is live, so the eye
+  // contact and posture readings keep moving between questions too. The flag
+  // tells the server which frames belong to the answer being scored.
+  useEffect(() => {
+    if (camStatus !== 'active' || !isConnected) return;
 
     const sampleInterval = setInterval(() => {
       const frameBase64 = captureSampledFrame();
       if (frameBase64) {
-        sendVideoFrame(frameBase64, speakingSpeed);
+        const live = telemetryRef.current;
+        sendVideoFrame(frameBase64, live.speakingSpeed, live.isAnswering);
       }
     }, 1500);
 
     return () => clearInterval(sampleInterval);
-  }, [isAnswering, camStatus, captureSampledFrame, sendVideoFrame, speakingSpeed]);
+  }, [camStatus, isConnected, captureSampledFrame, sendVideoFrame]);
 
   // Periodic audio telemetry chunk to WebSocket
   useEffect(() => {
     if (!isAnswering) return;
 
     const audioInterval = setInterval(() => {
-      sendAudioChunk(volume, speakingSpeed, transcript);
+      const live = telemetryRef.current;
+      sendAudioChunk(live.volume, live.speakingSpeed, live.transcript);
     }, 1000);
 
     return () => clearInterval(audioInterval);
-  }, [isAnswering, volume, speakingSpeed, transcript, sendAudioChunk]);
+  }, [isAnswering, sendAudioChunk]);
 
   // Handle Question Feedback Dialog
   useEffect(() => {
@@ -169,6 +195,7 @@ export const InterviewRoom: React.FC = () => {
   const handleStartAnswer = async () => {
     setError(null);
     await startMicrophone();
+    await enterLockdown();
     setIsAnswering(true);
   };
 
@@ -248,7 +275,7 @@ export const InterviewRoom: React.FC = () => {
     if (nextIdx < interview.questions.length) {
       setCurrentQuestionIndex(nextIdx);
       setActiveQuestion(interview.questions[nextIdx]);
-      setTranscript('');
+      resetTranscript();
     } else {
       // Complete entire interview
       requestCompleteInterview();
@@ -258,13 +285,13 @@ export const InterviewRoom: React.FC = () => {
   const totalQuestions = interview?.questions?.length || 3;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
+    <div className="min-h-screen bg-ink text-chalk flex flex-col">
       {/* Top Header Bar */}
-      <header className="bg-slate-900 border-b border-slate-800 px-4 sm:px-8 py-3.5 flex items-center justify-between">
+      <header className="bg-panel border-b border-line px-4 sm:px-8 py-3.5 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <span className="font-bold text-lg text-white">IntervuX</span>
-          <span className="text-xs px-2.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 uppercase font-semibold">
-            {interview?.type || 'Technical'} • {interview?.mode || 'Practice'}
+          <span className="font-bold text-lg text-chalk">IntervuX</span>
+          <span className="text-xs px-2.5 py-0.5 rounded-full bg-sodium-500/10 text-sodium-400 border border-sodium-500/20 font-semibold">
+            {interview?.type || 'Technical'} / {interview?.mode || 'Practice'}
           </span>
         </div>
 
@@ -272,12 +299,12 @@ export const InterviewRoom: React.FC = () => {
           {/* WebSocket Connection Status */}
           <div className="flex items-center gap-1.5 text-xs">
             {isConnected ? (
-              <span className="text-emerald-400 flex items-center gap-1">
+              <span className="text-good-400 flex items-center gap-1">
                 <Wifi className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Connected</span>
               </span>
             ) : (
-              <span className="text-amber-400 flex items-center gap-1">
+              <span className="text-flag-400 flex items-center gap-1">
                 <WifiOff className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Reconnecting...</span>
               </span>
@@ -285,8 +312,8 @@ export const InterviewRoom: React.FC = () => {
           </div>
 
           {/* Session Timer */}
-          <div className="flex items-center gap-1.5 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800 font-mono text-sm text-slate-200">
-            <Clock className="w-4 h-4 text-indigo-400" />
+          <div className="flex items-center gap-1.5 bg-ink px-3 py-1.5 rounded-control border border-line font-mono text-sm text-chalk">
+            <Clock className="w-4 h-4 text-sodium-400" />
             <span>{formatTimer(interviewElapsed)}</span>
           </div>
         </div>
@@ -296,7 +323,7 @@ export const InterviewRoom: React.FC = () => {
       <main className="flex-1 max-w-6xl w-full mx-auto p-4 sm:p-6 lg:p-8 flex flex-col gap-6">
         {/* Error Banners */}
         {(error || camError || micError) && (
-          <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center gap-3 text-red-400 text-xs">
+          <div className="p-4 bg-peak-500/10 border border-peak-500/20 rounded-control flex items-center gap-3 text-peak-400 text-xs">
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span>{error || camError || micError}</span>
           </div>
@@ -319,6 +346,87 @@ export const InterviewRoom: React.FC = () => {
           />
         </div>
 
+        {/* Session Integrity Monitor */}
+        <div
+          className={`rounded-panel border p-4 ${
+ integrity.status === 'clean'
+              ? 'bg-panel/80 border-line'
+              : integrity.status === 'review'
+              ? 'bg-flag-500/5 border-flag-500/30'
+              : 'bg-peak-500/5 border-peak-500/30'
+          }`}
+        >
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <span className="flex items-center gap-2 text-sm font-semibold text-chalk">
+              {integrity.status === 'clean' ? (
+                <ShieldCheck className="w-4 h-4 text-good-400" />
+              ) : (
+                <ShieldAlert className="w-4 h-4 text-flag-400" />
+              )}
+              Session Integrity
+              <span
+                className={`text-xs font-mono px-2 py-0.5 rounded-full border ${
+ integrity.status === 'clean'
+                    ? 'text-good-400 border-good-500/30 bg-good-500/10'
+                    : integrity.status === 'review'
+                    ? 'text-flag-400 border-flag-500/30 bg-flag-500/10'
+                    : 'text-peak-400 border-peak-500/30 bg-peak-500/10'
+                }`}
+              >
+                {integrity.integrity_score}/100
+              </span>
+            </span>
+
+            <div className="flex items-center gap-4 text-[11px] text-mute">
+              <span className="flex items-center gap-1.5">
+                <Eye className="w-3.5 h-3.5 text-sodium-400" />
+                {liveMetrics.gaze_direction || 'On camera'}
+              </span>
+              <span className="flex items-center gap-1.5">
+                <Users className="w-3.5 h-3.5 text-sodium-400" />
+                {liveMetrics.person_count ?? 1} in frame
+              </span>
+              <span className="flex items-center gap-1.5">
+                <Activity className="w-3.5 h-3.5 text-sodium-400" />
+                Background {(liveMetrics.background_motion ?? 0).toFixed(1)}%
+              </span>
+              {integrity.hidden_seconds > 0 && (
+                <span className="text-flag-400">{integrity.hidden_seconds}s off-tab</span>
+              )}
+            </div>
+          </div>
+
+          {integrity.flags.length > 0 && (
+            <ul className="mt-3 flex flex-wrap gap-2">
+              {integrity.flags.map((flag) => (
+                <li
+                  key={flag.type}
+                  className={`text-[11px] px-2.5 py-1 rounded-control border ${
+ flag.severity === 'high'
+                      ? 'text-peak-300 border-peak-500/30 bg-peak-500/10'
+                      : flag.severity === 'medium'
+                      ? 'text-flag-300 border-flag-500/30 bg-flag-500/10'
+                      : 'text-chalk-dim border-line bg-steel/60'
+                  }`}
+                >
+                  {flag.label}
+                  {flag.count > 1 && <span className="font-mono"> ×{flag.count}</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <p className="mt-3 text-[10px] text-mute leading-relaxed">
+            Tracks eye movement, posture, background activity, tab and window focus, displays, and
+            page injections. A screen overlay that draws outside the browser cannot be read directly
+            by any web page &mdash; what gives it away here is where the eyes go and where focus
+            goes. These are review flags, not an automated verdict.
+            {localFlags.length > 0 && (
+              <span className="text-mute"> Local triggers: {localFlags.join(', ')}.</span>
+            )}
+          </p>
+        </div>
+
         {/* Current Question */}
         <InterviewQuestion
           question={activeQuestion}
@@ -337,28 +445,28 @@ export const InterviewRoom: React.FC = () => {
 
         {/* Interim Spoken Transcript Preview */}
         {transcript && (
-          <div className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-4 text-xs">
-            <div className="flex items-center justify-between text-slate-400 mb-1">
-              <span className="font-medium text-slate-300">Live Speech Transcript Preview:</span>
+          <div className="bg-panel/60 border border-line/80 rounded-control p-4 text-xs">
+            <div className="flex items-center justify-between text-mute mb-1">
+              <span className="font-medium text-chalk-dim">Live Speech Transcript Preview:</span>
               <span>{answerDuration}s elapsed</span>
             </div>
-            <p className="text-slate-200 font-mono italic leading-relaxed">
+            <p className="text-chalk font-mono italic leading-relaxed">
               "{transcript}"
             </p>
           </div>
         )}
 
         {/* Controls Section */}
-        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col sm:flex-row items-center justify-between gap-4 mt-auto">
-          <div className="text-xs text-slate-400">
+        <div className="bg-panel/90 border border-line rounded-panel p-5 flex flex-col sm:flex-row items-center justify-between gap-4 mt-auto">
+          <div className="text-xs text-mute">
             {isAnswering ? (
-              <span className="flex items-center gap-2 text-emerald-400 font-medium">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="flex items-center gap-2 text-good-400 font-medium">
+                <span className="w-2.5 h-2.5 rounded-full bg-good-400 animate-pulse" />
                 Active speech recording in progress... Press "End Answer" when finished.
               </span>
             ) : isEvaluating ? (
-              <span className="flex items-center gap-2 text-indigo-400 font-medium">
-                <div className="w-3.5 h-3.5 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+              <span className="flex items-center gap-2 text-sodium-400 font-medium">
+                <div className="w-3.5 h-3.5 border-2 border-sodium-400 border-t-transparent rounded-full animate-spin" />
                 Multimodal AI is evaluating your answer and signals...
               </span>
             ) : (
@@ -371,7 +479,7 @@ export const InterviewRoom: React.FC = () => {
               <button
                 onClick={handleStartAnswer}
                 disabled={isEvaluating}
-                className="w-full sm:w-auto px-6 py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold text-sm rounded-xl shadow-lg shadow-emerald-600/25 transition-all flex items-center justify-center gap-2"
+                className="w-full sm:w-auto px-6 py-3 bg-good-600 hover:bg-good-500 disabled:opacity-50 text-chalk font-semibold text-sm rounded-control transition-all flex items-center justify-center gap-2"
               >
                 <Play className="w-4 h-4 fill-white" />
                 Start Answer
@@ -379,7 +487,7 @@ export const InterviewRoom: React.FC = () => {
             ) : (
               <button
                 onClick={handleEndAnswer}
-                className="w-full sm:w-auto px-6 py-3 bg-rose-600 hover:bg-rose-500 text-white font-semibold text-sm rounded-xl shadow-lg shadow-rose-600/25 transition-all flex items-center justify-center gap-2 animate-pulse"
+                className="w-full sm:w-auto px-6 py-3 bg-peak-600 hover:bg-peak-500 text-chalk font-semibold text-sm rounded-control transition-all flex items-center justify-center gap-2 animate-pulse"
               >
                 <Square className="w-4 h-4 fill-white" />
                 End Answer
@@ -389,7 +497,7 @@ export const InterviewRoom: React.FC = () => {
             {!isAnswering && !isEvaluating && currentQuestionIndex + 1 < totalQuestions && (
               <button
                 onClick={handleNextQuestion}
-                className="w-full sm:w-auto px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium text-xs rounded-xl border border-slate-700 transition-colors flex items-center justify-center gap-1.5"
+                className="w-full sm:w-auto px-4 py-3 bg-steel hover:bg-line text-chalk-dim font-medium text-xs rounded-control border border-line transition-colors flex items-center justify-center gap-1.5"
               >
                 Skip Question
                 <ArrowRight className="w-3.5 h-3.5" />
@@ -401,27 +509,56 @@ export const InterviewRoom: React.FC = () => {
 
       {/* Intermediate Question Evaluation Dialog */}
       {feedbackDialog && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 max-w-lg w-full shadow-2xl animate-scale-in">
+        <div className="fixed inset-0 bg-ink/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-panel border border-line rounded-panel p-6 sm:p-8 max-w-lg w-full animate-scale-in">
             <div className="flex items-center justify-between mb-4">
-              <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+              <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-good-500/10 text-good-400 border border-good-500/20">
                 Question {currentQuestionIndex + 1} Evaluated
               </span>
-              <span className="text-xl font-bold text-white">
+              <span className="text-xl font-bold text-chalk">
                 Score: {feedbackDialog.overall_score} / 100
               </span>
             </div>
 
-            <h3 className="text-lg font-bold text-white mb-2">Multimodal Signal Feedback</h3>
+            <h3 className="text-lg font-bold text-chalk mb-2">How that answer landed</h3>
+
+            {/* Spoken fluency for the answer just given */}
+            {feedbackDialog.fluency && feedbackDialog.fluency.fluency_score > 0 && (
+              <div className="panel-inset p-4 mb-4">
+                <div className="flex items-baseline justify-between gap-3 mb-3">
+                  <span className="text-xs text-chalk-dim">Spoken fluency</span>
+                  <span className="flex items-baseline gap-2">
+                    <span className="readout text-xl text-sodium-300">
+                      {feedbackDialog.fluency.fluency_score}
+                    </span>
+                    <Chip
+                      signal={
+                        feedbackDialog.fluency.fluency_score >= 70
+                          ? 'good'
+                          : feedbackDialog.fluency.fluency_score >= 40
+                          ? 'flag'
+                          : 'peak'
+                      }
+                    >
+                      {feedbackDialog.fluency.band}
+                    </Chip>
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+                  <Meter label="Pace" value={feedbackDialog.fluency.components.pace} />
+                  <Meter label="Filler control" value={feedbackDialog.fluency.components.filler_control} />
+                </div>
+              </div>
+            )}
 
             {/* Strengths */}
             {feedbackDialog.strengths && feedbackDialog.strengths.length > 0 && (
               <div className="mb-3">
-                <span className="text-xs font-semibold text-emerald-400 uppercase tracking-wider">Strengths</span>
-                <ul className="mt-1 space-y-1 text-xs text-slate-300">
+                <span className="text-xs font-semibold text-good-400">Strengths</span>
+                <ul className="mt-1 space-y-1 text-xs text-chalk-dim">
                   {feedbackDialog.strengths.map((s: string, i: number) => (
                     <li key={i} className="flex items-start gap-1.5">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                      <CheckCircle2 className="w-3.5 h-3.5 text-good-400 shrink-0 mt-0.5" />
                       <span>{s}</span>
                     </li>
                   ))}
@@ -432,11 +569,11 @@ export const InterviewRoom: React.FC = () => {
             {/* Suggestions */}
             {feedbackDialog.suggestions && feedbackDialog.suggestions.length > 0 && (
               <div className="mb-6">
-                <span className="text-xs font-semibold text-amber-400 uppercase tracking-wider">Recommendations</span>
-                <ul className="mt-1 space-y-1 text-xs text-slate-300">
+                <span className="text-xs font-semibold text-flag-400">Recommendations</span>
+                <ul className="mt-1 space-y-1 text-xs text-chalk-dim">
                   {feedbackDialog.suggestions.map((s: string, i: number) => (
                     <li key={i} className="flex items-start gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                      <Sparkles className="w-3.5 h-3.5 text-flag-400 shrink-0 mt-0.5" />
                       <span>{s}</span>
                     </li>
                   ))}
@@ -446,7 +583,7 @@ export const InterviewRoom: React.FC = () => {
 
             <button
               onClick={handleNextQuestion}
-              className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-semibold shadow-lg shadow-indigo-600/25 transition-all flex items-center justify-center gap-2"
+              className="w-full py-3 px-4 bg-sodium-600 hover:bg-sodium-500 text-chalk rounded-control text-sm font-semibold transition-all flex items-center justify-center gap-2"
             >
               {currentQuestionIndex + 1 < totalQuestions ? 'Next Question' : 'Complete Interview & View Report'}
               <ArrowRight className="w-4 h-4" />

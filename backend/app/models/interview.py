@@ -12,6 +12,11 @@ class Interview(Base):
     mode = Column(String(50), nullable=False)  # practice, simulation
     difficulty = Column(String(50), nullable=False, default="medium")  # easy, medium, hard
     status = Column(String(50), nullable=False, default="in_progress") # in_progress, completed
+    target_company = Column(String(120), nullable=True, index=True)
+    target_role = Column(String(120), nullable=True)
+    # Plain integer rather than a ForeignKey: SQLite cannot add FK constraints via
+    # ALTER TABLE, and this column arrived after the table existed.
+    contest_id = Column(Integer, nullable=True, index=True)
     started_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     ended_at = Column(DateTime, nullable=True)
     

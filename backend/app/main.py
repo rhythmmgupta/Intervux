@@ -4,9 +4,17 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.database.connection import engine, Base
+from app.database.connection import engine, Base, ensure_columns
 import app.models # ensure all models are registered with Base metadata
-from app.api import auth_router, interviews_router, questions_router, reports_router
+from app.api import (
+    auth_router,
+    interviews_router,
+    questions_router,
+    reports_router,
+    contests_router,
+    practice_router,
+    hr_router,
+)
 from app.websocket import websocket_router
 
 logging.basicConfig(
@@ -19,7 +27,20 @@ logger = logging.getLogger("intervux")
 async def lifespan(app: FastAPI):
     logger.info("Initializing database schema...")
     Base.metadata.create_all(bind=engine)
+    ensure_columns()
     logger.info("Database schema initialized.")
+
+    # Daily / weekly contests are generated, so a fresh deploy has them immediately.
+    from app.database.connection import SessionLocal
+    from app.services.contest_service import contest_service
+    db = SessionLocal()
+    try:
+        seeded = contest_service.ensure_contests(db)
+        logger.info(f"Contest seeding complete ({len(seeded)} new).")
+    except Exception as exc:
+        logger.warning(f"Contest seeding skipped: {exc}")
+    finally:
+        db.close()
     yield
     logger.info("Shutting down IntervuX application...")
 
@@ -44,6 +65,9 @@ app.include_router(auth_router)
 app.include_router(interviews_router)
 app.include_router(questions_router)
 app.include_router(reports_router)
+app.include_router(contests_router)
+app.include_router(practice_router)
+app.include_router(hr_router)
 
 # WebSocket Router
 app.include_router(websocket_router)

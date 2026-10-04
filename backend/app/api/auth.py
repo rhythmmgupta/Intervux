@@ -8,7 +8,7 @@ from typing import Optional
 
 from app.database.connection import get_db
 from app.models.user import User
-from app.schemas.auth import UserRegister, UserLogin, UserOut, Token
+from app.schemas.auth import UserRegister, UserLogin, UserOut, Token, ProfileUpdate
 from app.config import settings
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
@@ -64,11 +64,15 @@ def register(user_in: UserRegister, db: Session = Depends(get_db)):
             detail="An account with this email already exists."
         )
 
+    role = user_in.role if user_in.role in ("candidate", "hr") else "candidate"
     hashed_pw = get_password_hash(user_in.password)
     new_user = User(
         name=user_in.name,
         email=user_in.email,
-        password_hash=hashed_pw
+        password_hash=hashed_pw,
+        role=role,
+        target_company=user_in.target_company,
+        target_role=user_in.target_role
     )
     db.add(new_user)
     db.commit()
@@ -115,4 +119,18 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
 
 @router.get("/me", response_model=UserOut)
 def get_me(current_user: User = Depends(get_current_user)):
+    return current_user
+
+@router.patch("/me", response_model=UserOut)
+def update_me(
+    update: ProfileUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Update the signed-in user's name or their target company and role."""
+    for field, value in update.model_dump(exclude_unset=True).items():
+        if value is not None:
+            setattr(current_user, field, value)
+    db.commit()
+    db.refresh(current_user)
     return current_user

@@ -1,4 +1,19 @@
-import { AuthResponse, Interview, InterviewReportData, User } from '../types';
+import {
+  AuthResponse,
+  Company,
+  CompanyDetail,
+  Contest,
+  FluencyReport,
+  HRCandidate,
+  Interview,
+  InterviewReportData,
+  LeaderboardRow,
+  Rating,
+  ScoreboardRow,
+  SpeakingAttempt,
+  SpeakingPrompt,
+  User,
+} from '../types';
 
 const BASE_URL = ''; // Uses Vite proxy to http://localhost:8000
 
@@ -65,10 +80,15 @@ export class ApiService {
   }
 
   // Auth Endpoints
-  public static async register(name: string, email: string, password: string): Promise<AuthResponse> {
+  public static async register(
+    name: string,
+    email: string,
+    password: string,
+    options: { role?: 'candidate' | 'hr'; target_company?: string | null; target_role?: string | null } = {}
+  ): Promise<AuthResponse> {
     const data = await this.request<AuthResponse>('/api/auth/register', {
       method: 'POST',
-      body: JSON.stringify({ name, email, password }),
+      body: JSON.stringify({ name, email, password, role: options.role || 'candidate', ...options }),
     });
     this.setToken(data.access_token);
     this.setStoredUser(data.user);
@@ -100,11 +120,12 @@ export class ApiService {
     type: 'technical' | 'hr',
     mode: 'practice' | 'simulation',
     difficulty: 'easy' | 'medium' | 'hard',
-    question_count: number = 3
+    question_count: number = 3,
+    targeting: { target_company?: string | null; target_role?: string | null; contest_id?: number | null } = {}
   ): Promise<Interview> {
     return this.request<Interview>('/api/interviews', {
       method: 'POST',
-      body: JSON.stringify({ type, mode, difficulty, question_count }),
+      body: JSON.stringify({ type, mode, difficulty, question_count, ...targeting }),
     });
   }
 
@@ -144,6 +165,107 @@ export class ApiService {
       method: 'POST',
       body: JSON.stringify(data),
     });
+  }
+
+  public static async updateProfile(update: {
+    name?: string;
+    target_company?: string | null;
+    target_role?: string | null;
+  }): Promise<User> {
+    const user = await this.request<User>('/api/auth/me', {
+      method: 'PATCH',
+      body: JSON.stringify(update),
+    });
+    this.setStoredUser(user);
+    return user;
+  }
+
+  // Target companies
+  public static async getCompanies(tier?: string): Promise<Company[]> {
+    const query = tier ? `?tier=${encodeURIComponent(tier)}` : '';
+    return this.request<Company[]>(`/api/companies${query}`);
+  }
+
+  public static async getCompany(
+    slug: string,
+    interviewType: string = 'technical',
+    difficulty: string = 'medium'
+  ): Promise<CompanyDetail> {
+    return this.request<CompanyDetail>(
+      `/api/companies/${slug}?interview_type=${interviewType}&difficulty=${difficulty}`
+    );
+  }
+
+  // Contests and standings
+  public static async getContests(): Promise<Contest[]> {
+    return this.request<Contest[]>('/api/contests');
+  }
+
+  public static async joinContest(contestId: number): Promise<any> {
+    return this.request<any>(`/api/contests/${contestId}/join`, { method: 'POST' });
+  }
+
+  public static async getContestScoreboard(
+    contestId: number
+  ): Promise<{ contest: { id: number; title: string; company: string; kind: string }; scoreboard: ScoreboardRow[] }> {
+    return this.request(`/api/contests/${contestId}/scoreboard`);
+  }
+
+  public static async getLeaderboard(
+    company?: string
+  ): Promise<{ me: Rating; standings: LeaderboardRow[] }> {
+    const query = company ? `?company=${encodeURIComponent(company)}` : '';
+    return this.request(`/api/leaderboard${query}`);
+  }
+
+  public static async getRating(): Promise<Rating> {
+    return this.request<Rating>('/api/rating');
+  }
+
+  // English speaking practice
+  public static async getSpeakingPrompts(level?: string): Promise<SpeakingPrompt[]> {
+    const query = level ? `?level=${level}` : '';
+    return this.request<SpeakingPrompt[]>(`/api/practice/prompts${query}`);
+  }
+
+  public static async submitSpeakingAttempt(data: {
+    prompt_id?: string;
+    prompt?: string;
+    transcript: string;
+    duration: number;
+    filler_count?: number;
+  }): Promise<FluencyReport & { attempt_id: number; created_at: string }> {
+    return this.request('/api/practice/attempts', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  public static async getSpeakingAttempts(): Promise<{
+    summary: {
+      attempts: number;
+      latest_score: number | null;
+      best_score: number | null;
+      average_score: number | null;
+      trend: number;
+    };
+    attempts: SpeakingAttempt[];
+  }> {
+    return this.request('/api/practice/attempts');
+  }
+
+  // HR portal
+  public static async getHRCandidates(company?: string): Promise<HRCandidate[]> {
+    const query = company ? `?company=${encodeURIComponent(company)}` : '';
+    return this.request<HRCandidate[]>(`/api/hr/candidates${query}`);
+  }
+
+  public static async getHRCandidate(userId: number): Promise<any> {
+    return this.request<any>(`/api/hr/candidates/${userId}`);
+  }
+
+  public static async getHRContests(): Promise<any[]> {
+    return this.request<any[]>('/api/hr/contests');
   }
 
   // Question Bank

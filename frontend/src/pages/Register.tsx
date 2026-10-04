@@ -1,15 +1,26 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ApiService } from '../services/api';
-import { Video, Lock, Mail, User, AlertCircle, ArrowRight } from 'lucide-react';
+import { Lock, Mail, User, AlertCircle } from 'lucide-react';
+import { Company } from '../types';
 
 export const Register: React.FC = () => {
   const navigate = useNavigate();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [role, setRole] = useState<'candidate' | 'hr'>('candidate');
+  const [company, setCompany] = useState('');
+  const [targetRole, setTargetRole] = useState('');
+  const [companies, setCompanies] = useState<Company[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    ApiService.getCompanies().then(setCompanies).catch(() => setCompanies([]));
+  }, []);
+
+  const roleOptions = companies.find((c) => c.name === company)?.roles || [];
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -17,8 +28,12 @@ export const Register: React.FC = () => {
     setIsLoading(true);
 
     try {
-      await ApiService.register(name, email, password);
-      navigate('/dashboard');
+      await ApiService.register(name, email, password, {
+        role,
+        target_company: company || null,
+        target_role: role === 'candidate' ? targetRole || null : null,
+      });
+      navigate(role === 'hr' ? '/hr' : '/dashboard');
     } catch (err: any) {
       setError(err.message || 'Registration failed. Please check your inputs.');
     } finally {
@@ -27,21 +42,28 @@ export const Register: React.FC = () => {
   };
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 bg-slate-950">
+    <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 bg-ink">
       <div className="max-w-md w-full">
         {/* Brand Header */}
-        <div className="text-center mb-8">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center text-white mx-auto shadow-lg shadow-indigo-500/20 mb-4">
-            <Video className="w-6 h-6" />
-          </div>
-          <h2 className="text-2xl font-bold tracking-tight text-white">Create an IntervuX account</h2>
-          <p className="text-xs text-slate-400 mt-1">Start practicing with real-time multimodal AI analysis</p>
+        <div className="mb-8">
+          <span className="flex items-end gap-[3px] h-6 mb-4" aria-hidden="true">
+            <span className="w-1 h-2.5 bg-sodium-600" />
+            <span className="w-1 h-4 bg-sodium-500" />
+            <span className="w-1 h-6 bg-sodium-400" />
+            <span className="w-1 h-3.5 bg-good-500" />
+          </span>
+          <h1 className="signage text-3xl text-chalk">Create an account</h1>
+          <p className="text-sm text-mute mt-2 leading-relaxed">
+            {role === 'hr'
+              ? 'Review how candidates preparing for your roles are performing.'
+              : 'Practise under observation and watch your delivery scores move.'}
+          </p>
         </div>
 
         {/* Card */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl">
+        <div className="bg-panel border border-line rounded-panel p-8">
           {error && (
-            <div className="mb-6 p-3.5 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center gap-3 text-red-400 text-xs">
+            <div className="mb-6 p-3.5 bg-peak-500/10 border border-peak-500/20 rounded-control flex items-center gap-3 text-peak-400 text-xs">
               <AlertCircle className="w-4 h-4 shrink-0" />
               <span>{error}</span>
             </div>
@@ -49,71 +71,134 @@ export const Register: React.FC = () => {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1.5">Full Name</label>
+              <label className="block text-xs font-medium text-chalk-dim mb-1.5">I am signing up as</label>
+              <div className="grid grid-cols-2 gap-2">
+                {([
+                  ['candidate', 'A candidate', 'Practise and get scored'],
+                  ['hr', 'HR or recruiter', 'Review candidates'],
+                ] as const).map(([value, label, hint]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setRole(value)}
+                    className={`p-3 text-left border rounded-control transition-colors ${
+                      role === value
+                        ? 'border-sodium-500 bg-sodium-600/10'
+                        : 'border-line hover:border-mute'
+                    }`}
+                  >
+                    <span className="block text-sm text-chalk">{label}</span>
+                    <span className="block text-[11px] text-mute mt-0.5">{hint}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-chalk-dim mb-1.5">Full Name</label>
               <div className="relative">
-                <User className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <User className="w-4 h-4 text-mute absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
                   type="text"
                   required
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="Alex Rivera"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition-colors"
+                  className="w-full bg-ink border border-line rounded-control pl-10 pr-4 py-2.5 text-sm text-chalk placeholder-line focus:outline-none focus:border-sodium-500 transition-colors"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1.5">Email Address</label>
+              <label className="block text-xs font-medium text-chalk-dim mb-1.5">Email Address</label>
               <div className="relative">
-                <Mail className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <Mail className="w-4 h-4 text-mute absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
                   type="email"
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="alex@example.com"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition-colors"
+                  className="w-full bg-ink border border-line rounded-control pl-10 pr-4 py-2.5 text-sm text-chalk placeholder-line focus:outline-none focus:border-sodium-500 transition-colors"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1.5">Password</label>
+              <label className="block text-xs font-medium text-chalk-dim mb-1.5">Password</label>
               <div className="relative">
-                <Lock className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <Lock className="w-4 h-4 text-mute absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
                   type="password"
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition-colors"
+                  className="w-full bg-ink border border-line rounded-control pl-10 pr-4 py-2.5 text-sm text-chalk placeholder-line focus:outline-none focus:border-sodium-500 transition-colors"
                 />
               </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-chalk-dim mb-1.5">
+                  {role === 'hr' ? 'Company you recruit for' : 'Target company'}
+                </label>
+                <select
+                  value={company}
+                  onChange={(e) => {
+                    setCompany(e.target.value);
+                    setTargetRole('');
+                  }}
+                  className="w-full bg-ink border border-line rounded-control px-3 py-2.5 text-sm text-chalk focus:outline-none focus:border-sodium-500 transition-colors"
+                >
+                  <option value="">Not sure yet</option>
+                  {companies.map((item) => (
+                    <option key={item.slug} value={item.name}>
+                      {item.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {role === 'candidate' && (
+                <div>
+                  <label className="block text-xs font-medium text-chalk-dim mb-1.5">Target role</label>
+                  <select
+                    value={targetRole}
+                    onChange={(e) => setTargetRole(e.target.value)}
+                    disabled={roleOptions.length === 0}
+                    className="w-full bg-ink border border-line rounded-control px-3 py-2.5 text-sm text-chalk disabled:opacity-50 focus:outline-none focus:border-sodium-500 transition-colors"
+                  >
+                    <option value="">{roleOptions.length ? 'Any role' : 'Pick a company first'}</option>
+                    {roleOptions.map((item) => (
+                      <option key={item} value={item}>
+                        {item}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
 
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full mt-2 py-3 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-semibold shadow-lg shadow-indigo-600/25 transition-all flex items-center justify-center gap-2"
+              className="w-full mt-2 py-3 px-4 rounded-control bg-sodium-500 hover:bg-sodium-400 disabled:opacity-50 text-ink text-sm font-semibold transition-colors flex items-center justify-center gap-2"
             >
               {isLoading ? (
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                <div className="w-4 h-4 border-2 border-chalk border-t-transparent rounded-full animate-spin" />
               ) : (
-                <>
-                  Create Account
-                  <ArrowRight className="w-4 h-4" />
-                </>
+                'Create account'
               )}
             </button>
           </form>
         </div>
 
-        <p className="text-center text-xs text-slate-400 mt-6">
+        <p className="text-center text-xs text-mute mt-6">
           Already have an account?{' '}
-          <Link to="/login" className="text-indigo-400 font-semibold hover:underline">
-            Sign In
+          <Link to="/login" className="text-sodium-300 hover:underline">
+            Sign in
           </Link>
         </p>
       </div>

@@ -17,6 +17,7 @@ class TimelinePoint(BaseModel):
     eye_contact: float
     speaking_speed: float
     filler_count: int
+    fluency_score: float = 0.0
 
 class InterviewReport(BaseModel):
     interview: InterviewOut
@@ -25,4 +26,7 @@ class InterviewReport(BaseModel):
     radar_scores: List[Dict[str, Any]]
     recommendations: List[RecommendationOut]
     questions: List[QuestionDetailOut]
+    # Fluency is derived from the stored transcripts rather than persisted, so it
+    # always reflects the current scoring rules.
+    fluency: Dict[str, Any] = {}
     ai_mode_badge: str # "Live AI (OpenAI/Whisper/MediaPipe)" or "Mock/Development Mode"

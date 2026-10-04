@@ -1,16 +1,92 @@
+@import url("https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=JetBrains+Mono:wght@400..700&display=swap");
 @import "tailwindcss";
 
-@layer base {
-  :root {
-    --color-bg-primary: #0f172a;
-    --color-bg-secondary: #1e293b;
-    --color-accent: #6366f1;
-  }
+/*
+  IntervuX visual language: studio metering equipment.
 
+  The product measures a person speaking - level, pace, gaze, poise - so the
+  interface is built like the front panel of a monitoring desk: warm graphite
+  panels, hairline rules, almost no corner radius, no drop shadows. Hierarchy
+  comes from border weight and panel tint, never from a shadow stack.
+
+  The dark base is functional, not fashion: the candidate is lit by their own
+  screen while on camera, and a bright interface washes their face out.
+
+  Signal colours carry meaning and are not interchangeable:
+    sodium = the instrument's own accent, and anything on target
+    good   = inside the measured band
+    flag   = approaching a limit, worth attention
+    peak   = over the limit, or an integrity flag
+*/
+
+@theme {
+  /* Surfaces, darkest to lightest */
+  --color-ink: #0c100f;
+  --color-panel: #121917;
+  --color-steel: #1a2320;
+  --color-line: #28332e;
+
+  /* Type */
+  --color-mute: #869089;
+  --color-chalk-dim: #bdc4ba;
+  --color-chalk: #eceadf;
+
+  /* Sodium lamp: the house accent */
+  --color-sodium-200: #f7d9a3;
+  --color-sodium-300: #f2c377;
+  --color-sodium-400: #eaa94a;
+  --color-sodium-500: #e0912a;
+  --color-sodium-600: #c2741c;
+  --color-sodium-700: #995717;
+
+  /* In band */
+  --color-good-200: #bfe3cd;
+  --color-good-300: #97d2ae;
+  --color-good-400: #6dbd8d;
+  --color-good-500: #4aa272;
+  --color-good-600: #35825b;
+  --color-good-700: #276547;
+
+  /* Nearing a limit */
+  --color-flag-200: #f7e3a8;
+  --color-flag-300: #efcf72;
+  --color-flag-400: #e3b545;
+  --color-flag-500: #cf9a25;
+  --color-flag-600: #a87a1b;
+  --color-flag-700: #825e16;
+
+  /* Over the limit */
+  --color-peak-200: #f3c3bc;
+  --color-peak-300: #e79b90;
+  --color-peak-400: #d8705f;
+  --color-peak-500: #c75242;
+  --color-peak-600: #a63f33;
+  --color-peak-700: #83322a;
+
+  /* Cool readouts: elapsed time, counts, neutral data */
+  --color-cool-200: #bcd4d6;
+  --color-cool-300: #92b9bd;
+  --color-cool-400: #68999f;
+  --color-cool-500: #4b7c83;
+  --color-cool-600: #3a636a;
+  --color-cool-700: #2e4e54;
+
+  --font-sans: "Archivo", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  /* Equipment radii: panels are cut, not rounded */
+  --radius-panel: 3px;
+  --radius-control: 2px;
+}
+
+@layer base {
   body {
-    @apply bg-slate-950 text-slate-100 antialiased min-h-screen font-sans;
+    @apply bg-ink text-chalk antialiased min-h-screen font-sans;
     margin: 0;
     padding: 0;
+    /* Faint panel grain, so large dark areas are not flat voids. */
+    background-image: radial-gradient(rgba(236, 234, 223, 0.022) 1px, transparent 1px);
+    background-size: 4px 4px;
   }
 
   #root {
@@ -18,23 +94,97 @@
     display: flex;
     flex-direction: column;
   }
+
+  /* Numbers are read, compared and scanned down a column, so they are always
+     tabular. Labels stay in the sans - mono labels are costume, not clarity. */
+  .readout {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+
+  /* Signage headings use Archivo's width axis as part of the design. */
+  .signage {
+    font-stretch: 112%;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+  }
+
+  .signage-tight {
+    font-stretch: 78%;
+    font-weight: 800;
+    letter-spacing: 0.005em;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-sodium-400);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+    }
+  }
 }
 
-/* Custom scrollbars */
+/* A measurement meter with a marked target band: the one piece of signature
+   hardware in the interface. Used wherever a value has an ideal range. */
+@layer components {
+  .meter {
+    @apply relative h-2 w-full overflow-hidden bg-ink border border-line;
+    border-radius: 1px;
+  }
+
+  .meter-fill {
+    @apply absolute inset-y-0 left-0;
+    transition: width 120ms linear;
+  }
+
+  .meter-band {
+    @apply absolute inset-y-0 border-x border-dashed;
+    border-color: rgba(236, 234, 223, 0.28);
+  }
+
+  .meter-ticks {
+    @apply absolute inset-0;
+    background-image: repeating-linear-gradient(
+      to right,
+      rgba(236, 234, 223, 0.16) 0 1px,
+      transparent 1px 10%
+    );
+  }
+
+  .panel {
+    @apply bg-panel border border-line;
+    border-radius: var(--radius-panel);
+  }
+
+  .panel-inset {
+    @apply bg-ink border border-line;
+    border-radius: var(--radius-control);
+  }
+}
+
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(15, 23, 42, 0.6);
+  background: var(--color-ink);
+  border-left: 1px solid var(--color-line);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(100, 116, 139, 0.5);
-  border-radius: 4px;
+  background: var(--color-steel);
+  border: 1px solid var(--color-line);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.7);
+  background: var(--color-line);
 }

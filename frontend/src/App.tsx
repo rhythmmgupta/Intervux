@@ -9,11 +9,15 @@ import { InterviewSetup } from './pages/InterviewSetup';
 import { InterviewRoom } from './pages/InterviewRoom';
 import { Report } from './pages/Report';
 import { History } from './pages/History';
+import { Contests } from './pages/Contests';
+import { Leaderboard } from './pages/Leaderboard';
+import { SpeakingPractice } from './pages/SpeakingPractice';
+import { HRDashboard } from './pages/HRDashboard';
 
 export const App: React.FC = () => {
   return (
     <BrowserRouter>
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-indigo-500 selection:text-white">
+      <div className="min-h-screen bg-ink text-chalk flex flex-col font-sans selection:bg-sodium-500 selection:text-chalk">
         <Navbar />
         <div className="flex-1">
           <Routes>
@@ -25,6 +29,10 @@ export const App: React.FC = () => {
             <Route path="/interview/:id" element={<InterviewRoom />} />
             <Route path="/report/:id" element={<Report />} />
             <Route path="/history" element={<History />} />
+            <Route path="/contests" element={<Contests />} />
+            <Route path="/scoreboard" element={<Leaderboard />} />
+            <Route path="/speaking" element={<SpeakingPractice />} />
+            <Route path="/hr" element={<HRDashboard />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </div>

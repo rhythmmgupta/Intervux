@@ -35,14 +35,30 @@ def create_interview(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Create a new mock interview session and generate sequential questions."""
+    """
+    Create a new mock interview session and generate sequential questions.
+
+    A `contest_id` requires an entry in that contest: attendance is what unlocks
+    the sealed question set.
+    """
+    if interview_in.contest_id:
+        from app.services.contest_service import contest_service
+        if not contest_service.get_entry(db, interview_in.contest_id, current_user.id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Join this contest before starting its question set."
+            )
+
     interview = interview_service.create_interview(
         db=db,
         user_id=current_user.id,
         interview_type=interview_in.type,
         mode=interview_in.mode,
         difficulty=interview_in.difficulty,
-        question_count=interview_in.question_count
+        question_count=interview_in.question_count,
+        target_company=interview_in.target_company,
+        target_role=interview_in.target_role,
+        contest_id=interview_in.contest_id
     )
     return interview
 

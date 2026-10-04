@@ -69,6 +69,39 @@ class InterviewService:
 
         return matched[:limit]
 
+    def _select_questions(
+        self,
+        db: Session,
+        interview_type: str,
+        difficulty: str,
+        question_count: int,
+        target_company: Optional[str] = None,
+        target_role: Optional[str] = None,
+        contest_id: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """Resolve the question set for a session. Imported lazily to avoid a cycle."""
+        if contest_id:
+            from app.models.engagement import Contest
+            contest = db.query(Contest).filter(Contest.id == contest_id).first()
+            if contest:
+                questions = json.loads(contest.questions_json or "[]")
+                if questions:
+                    return questions[:question_count]
+
+        if target_company:
+            from app.services.company_service import company_service
+            questions = company_service.select_questions(
+                slug=target_company,
+                interview_type=interview_type,
+                difficulty=difficulty,
+                limit=question_count,
+                role=target_role
+            )
+            if questions:
+                return questions
+
+        return self.get_question_templates(interview_type, difficulty, question_count)
+
     def create_interview(
         self,
         db: Session,
@@ -76,23 +109,43 @@ class InterviewService:
         interview_type: str,
         mode: str,
         difficulty: str,
-        question_count: int = 4
+        question_count: int = 4,
+        target_company: Optional[str] = None,
+        target_role: Optional[str] = None,
+        contest_id: Optional[int] = None
     ) -> Interview:
-        """Create new interview record and attach initial question sequence."""
+        """
+        Create new interview record and attach initial question sequence.
+
+        Question source, in order of precedence:
+        1. a contest's sealed question set (identical for every attendee)
+        2. the target company's pool (signature questions plus its focus areas)
+        3. the generic question bank
+        """
         interview = Interview(
             user_id=user_id,
             type=interview_type,
             mode=mode,
             difficulty=difficulty,
             status="in_progress",
+            target_company=target_company,
+            target_role=target_role,
+            contest_id=contest_id,
             started_at=datetime.now(timezone.utc)
         )
         db.add(interview)
         db.commit()
         db.refresh(interview)
 
-        # Populate questions from question bank
-        selected_questions = self.get_question_templates(interview_type, difficulty, question_count)
+        selected_questions = self._select_questions(
+            db=db,
+            interview_type=interview_type,
+            difficulty=difficulty,
+            question_count=question_count,
+            target_company=target_company,
+            target_role=target_role,
+            contest_id=contest_id
+        )
         for idx, q_data in enumerate(selected_questions, start=1):
             q = Question(
                 interview_id=interview.id,
@@ -315,6 +368,12 @@ class InterviewService:
 
         db.commit()
         db.refresh(interview)
+
+        # If this run was a contest attempt, post the score to the attendee's entry.
+        if interview.contest_id:
+            from app.services.contest_service import contest_service
+            contest_service.record_contest_result(db, interview)
+
         return interview
 
 interview_service = InterviewService()

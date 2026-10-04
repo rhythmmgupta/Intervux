@@ -12,6 +12,7 @@ from app.services.vision_service import vision_service
 from app.services.speech_service import speech_service
 from app.services.fusion_engine import fusion_engine
 from app.services.interview_service import interview_service
+from app.services.proctor_service import proctor_service
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,7 @@ async def interview_websocket_endpoint(websocket: WebSocket, interview_id: int):
     current_question_index = 0
     cached_vision_metrics = vision_service._default_metrics()
     accumulated_audio_volume: List[float] = []
+    proctor_service.reset_session(interview_id)
 
     db: Session = SessionLocal()
 
@@ -105,15 +107,26 @@ async def interview_websocket_endpoint(websocket: WebSocket, interview_id: int):
             if event_type == "video_frame":
                 # Sampled frame received from client webcam preview
                 frame_b64 = payload.get("frame")
+                # Frames arrive continuously so the live readout keeps moving, but
+                # only those captured during an answer count toward its aggregate.
+                is_answering = bool(payload.get("is_answering", True))
                 if frame_b64:
                     frame = vision_service.decode_frame(frame_b64)
                     if frame is not None:
-                        cached_vision_metrics = vision_service.analyze_frame(frame)
+                        cached_vision_metrics = vision_service.analyze_frame(frame, record=is_answering)
                     
                 # Broadcast live vision update
                 await manager.send_json(websocket, {
                     "event": "video_metrics",
                     "metrics": cached_vision_metrics
+                })
+
+                # Live integrity state (vision flags + browser events so far)
+                await manager.send_json(websocket, {
+                    "event": "integrity_update",
+                    "integrity": proctor_service.summarize(
+                        interview_id, vision_service.get_aggregate_metrics()
+                    )
                 })
 
                 # In practice mode, check for real-time coaching tips
@@ -171,7 +184,25 @@ async def interview_websocket_endpoint(websocket: WebSocket, interview_id: int):
                             "tip": tip
                         })
 
-            # 3. Question Completed (Answer Submitted)
+            # 3. Browser Environment Integrity Event
+            elif event_type == "integrity_event":
+                proctor_service.record_event(
+                    interview_id,
+                    payload.get("type", ""),
+                    payload.get("detail", {})
+                )
+                summary = proctor_service.summarize(interview_id, vision_service.get_aggregate_metrics())
+                await manager.send_json(websocket, {
+                    "event": "integrity_update",
+                    "integrity": summary
+                })
+                if interview.mode == "practice" and summary["status"] != "clean":
+                    await manager.send_json(websocket, {
+                        "event": "feedback",
+                        "tip": "Keep the interview tab focused and your eyes on the camera — session integrity is being tracked."
+                    })
+
+            # 4. Question Completed (Answer Submitted)
             elif event_type == "question_completed":
                 question_id = payload.get("question_id")
                 transcript = payload.get("transcript", "").strip()
@@ -185,8 +216,15 @@ async def interview_websocket_endpoint(websocket: WebSocket, interview_id: int):
                 )
                 accumulated_audio_volume = []
 
-                # Aggregate vision metrics
+                fluency = speech_service.score_fluency(
+                    transcript=speech_res["transcript"],
+                    duration_seconds=speech_res["duration"],
+                    filler_count=speech_res["filler_count"]
+                )
+
+                # Aggregate vision metrics and the integrity summary for this answer
                 agg_vision = vision_service.get_aggregate_metrics()
+                integrity = proctor_service.summarize(interview_id, agg_vision)
                 vision_service.reset_session()
 
                 # Process answer with LLM and save response
@@ -216,7 +254,9 @@ async def interview_websocket_endpoint(websocket: WebSocket, interview_id: int):
                         "filler_count": response_record.filler_count,
                         "pause_duration": response_record.pause_duration
                     },
-                    "vision_metrics": agg_vision
+                    "vision_metrics": agg_vision,
+                    "integrity": integrity,
+                    "fluency": fluency
                 })
 
                 # Advance to next question or complete
@@ -242,10 +282,11 @@ async def interview_websocket_endpoint(websocket: WebSocket, interview_id: int):
                         "overall_score": completed_interview.overall_score,
                         "communication_score": completed_interview.communication_score,
                         "technical_score": completed_interview.technical_score,
-                        "body_language_score": completed_interview.body_language_score
+                        "body_language_score": completed_interview.body_language_score,
+                        "integrity": proctor_service.summarize(interview_id)
                     })
 
-            # 4. Explicit Interview Completion Request
+            # 5. Explicit Interview Completion Request
             elif event_type == "complete_interview":
                 completed_interview = interview_service.complete_interview(db=db, interview_id=interview_id)
                 await manager.send_json(websocket, {

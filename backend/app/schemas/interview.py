@@ -9,6 +9,9 @@ class InterviewCreate(BaseModel):
     mode: str = "practice"       # practice, simulation
     difficulty: str = "medium"   # easy, medium, hard
     question_count: int = 4
+    target_company: Optional[str] = None  # company slug, e.g. "microsoft"
+    target_role: Optional[str] = None
+    contest_id: Optional[int] = None      # set when this run is a contest attempt
 
 class InterviewUpdate(BaseModel):
     status: Optional[str] = None
@@ -30,6 +33,9 @@ class InterviewOut(BaseModel):
     mode: str
     difficulty: str
     status: str
+    target_company: Optional[str] = None
+    target_role: Optional[str] = None
+    contest_id: Optional[int] = None
     started_at: datetime
     ended_at: Optional[datetime] = None
     overall_score: Optional[float] = None

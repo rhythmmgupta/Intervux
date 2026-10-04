@@ -9,6 +9,7 @@ from app.models.interview import Interview
 from app.schemas.report import InterviewReport, ScoreCard, TimelinePoint
 from app.api.auth import get_current_user
 from app.services.llm_service import llm_service
+from app.services.speech_service import speech_service
 
 router = APIRouter(prefix="/api/reports", tags=["Reports & Analytics"])
 
@@ -86,22 +87,52 @@ def get_interview_report(
         ),
     ]
 
-    # Timeline data per question
+    # Timeline data per question, with spoken-fluency scored per answer
     timeline = []
+    answer_fluencies = []
     for q in interview.questions:
         if q.response:
             resp = q.response
             vm = resp.vision_metrics
             eval_score = resp.answer_evaluation.overall_score if resp.answer_evaluation else 70.0
             eye_val = vm.eye_contact if vm else 75.0
+            fluency = speech_service.score_fluency(
+                transcript=resp.transcript or "",
+                duration_seconds=resp.duration or 0.0,
+                filler_count=resp.filler_count
+            )
+            if fluency["fluency_score"] > 0:
+                answer_fluencies.append(fluency)
             timeline.append(TimelinePoint(
                 question_number=q.order_number,
                 question_category=q.category,
                 overall_score=round(eval_score, 1),
                 eye_contact=round(eye_val, 1),
                 speaking_speed=round(resp.speaking_speed, 1),
-                filler_count=resp.filler_count
+                filler_count=resp.filler_count,
+                fluency_score=fluency["fluency_score"]
             ))
+
+    # Session-level fluency: the mean of each answer's score and components
+    if answer_fluencies:
+        component_keys = answer_fluencies[0]["components"].keys()
+        fluency_summary = {
+            "fluency_score": round(sum(f["fluency_score"] for f in answer_fluencies) / len(answer_fluencies), 1),
+            "components": {
+                key: round(sum(f["components"][key] for f in answer_fluencies) / len(answer_fluencies), 1)
+                for key in component_keys
+            },
+            "answers_scored": len(answer_fluencies),
+            "tips": list(dict.fromkeys(tip for f in answer_fluencies for tip in f["tips"]))[:3],
+            "strengths": list(dict.fromkeys(s for f in answer_fluencies for s in f["strengths"]))[:3],
+        }
+        avg = fluency_summary["fluency_score"]
+        fluency_summary["band"] = (
+            "Fluent" if avg >= 85 else "Advanced" if avg >= 70
+            else "Upper Intermediate" if avg >= 55 else "Intermediate" if avg >= 40 else "Developing"
+        )
+    else:
+        fluency_summary = {"fluency_score": 0.0, "band": "Not enough speech", "components": {}, "answers_scored": 0, "tips": [], "strengths": []}
 
     # Radar chart scores
     radar_scores = [
@@ -127,5 +158,6 @@ def get_interview_report(
         radar_scores=radar_scores,
         recommendations=interview.recommendations,
         questions=interview.questions,
+        fluency=fluency_summary,
         ai_mode_badge=ai_mode_badge
     )

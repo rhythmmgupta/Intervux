@@ -6,16 +6,27 @@ export function useCamera() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  // Each start claims a token. A start whose token is stale by the time its
+  // async work finishes has been superseded, and must not touch the element.
+  const startTokenRef = useRef(0);
   const [status, setStatus] = useState<CameraStatus>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const startCamera = useCallback(async () => {
+    const token = ++startTokenRef.current;
     setStatus('requesting');
     setErrorMessage(null);
 
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         throw new Error('MediaDevices API is not supported in this browser environment.');
+      }
+
+      // Release any stream already running before requesting another, otherwise
+      // two live tracks fight over the same element.
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
       }
 
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -27,24 +38,41 @@ export function useCamera() {
         audio: false,
       });
 
+      // A newer start (or an unmount) happened while we were waiting.
+      if (token !== startTokenRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        await videoRef.current.play();
+        try {
+          await videoRef.current.play();
+        } catch (playErr: any) {
+          // Assigning a new srcObject rejects any play() still in flight with
+          // AbortError. It is noise, not a failure, and must not surface as an
+          // error banner - React's development double-mount triggers it every time.
+          if (playErr?.name !== 'AbortError') throw playErr;
+        }
       }
+      if (token !== startTokenRef.current) return;
       setStatus('active');
     } catch (err: any) {
+      if (token !== startTokenRef.current) return;
       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
         setStatus('denied');
-        setErrorMessage('Unable to access your camera. Please allow camera permissions in your browser settings and try again.');
+        setErrorMessage('Camera access is blocked. Allow the camera for this site in your browser settings, then try again.');
       } else {
         setStatus('error');
-        setErrorMessage(err.message || 'Failed to start video camera.');
+        setErrorMessage(err.message || 'The camera could not be started.');
       }
     }
   }, []);
 
   const stopCamera = useCallback(() => {
+    // Invalidate any start still in flight.
+    startTokenRef.current += 1;
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;

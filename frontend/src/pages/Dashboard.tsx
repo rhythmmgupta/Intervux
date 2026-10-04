@@ -1,25 +1,30 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ApiService } from '../services/api';
-import { Interview, ScoreCardData } from '../types';
-import { ScoreCard } from '../components/ScoreCard';
+import { Contest, Interview, Rating } from '../types';
+import { Chip, Meter, SpecRow } from '../components/Meter';
 import { SessionComparisonChart } from '../components/Charts';
-import {
-  Sparkles,
-  ArrowRight,
-  TrendingUp,
-  Award,
-  Video,
-  Clock,
-  CheckCircle,
-  AlertCircle,
-  ExternalLink,
-} from 'lucide-react';
+import { AlertCircle } from 'lucide-react';
+
+const TIER_SIGNAL: Record<string, 'sodium' | 'good' | 'cool' | 'flag' | 'neutral'> = {
+  Diamond: 'sodium',
+  Platinum: 'sodium',
+  Gold: 'good',
+  Silver: 'cool',
+  Bronze: 'flag',
+  Unrated: 'neutral',
+};
+
+const average = (values: number[]) =>
+  values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
 
 export const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const [interviews, setInterviews] = useState<Interview[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [rating, setRating] = useState<Rating | null>(null);
+  const [contests, setContests] = useState<Contest[]>([]);
+  const [practice, setPractice] = useState<{ attempts: number; latest_score: number | null; best_score: number | null } | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const user = ApiService.getCurrentStoredUser();
@@ -30,280 +35,241 @@ export const Dashboard: React.FC = () => {
       return;
     }
 
-    const loadInterviews = async () => {
-      try {
-        setLoading(true);
-        const data = await ApiService.getInterviews();
-        setInterviews(data);
-      } catch (err: any) {
-        setError(err.message || 'Failed to load interview history');
-      } finally {
-        setLoading(false);
-      }
-    };
-    loadInterviews();
+    Promise.all([
+      ApiService.getInterviews(),
+      ApiService.getRating().catch(() => null),
+      ApiService.getContests().catch(() => []),
+      ApiService.getSpeakingAttempts().catch(() => null),
+    ])
+      .then(([sessions, myRating, openContests, drills]) => {
+        setInterviews(sessions);
+        setRating(myRating);
+        setContests(openContests);
+        setPractice(drills ? drills.summary : null);
+      })
+      .catch((err) => setError(err.message || 'Could not load your dashboard.'))
+      .finally(() => setLoading(false));
   }, [navigate]);
 
-  // Aggregate stats across completed interviews
   const completed = interviews.filter((i) => i.status === 'completed' && i.overall_score != null);
+  const hasData = completed.length > 0;
 
-  const avgOverall = completed.length
-    ? Math.round(completed.reduce((acc, curr) => acc + (curr.overall_score || 0), 0) / completed.length)
-    : 81;
-
-  const avgComm = completed.length
-    ? Math.round(completed.reduce((acc, curr) => acc + (curr.communication_score || 0), 0) / completed.length)
-    : 79;
-
-  const avgBody = completed.length
-    ? Math.round(completed.reduce((acc, curr) => acc + (curr.body_language_score || 0), 0) / completed.length)
-    : 84;
-
-  const avgSpeech = completed.length
-    ? Math.round(completed.reduce((acc, curr) => acc + (curr.speech_score || 0), 0) / completed.length)
-    : 78;
-
-  const avgTech = completed.length
-    ? Math.round(completed.reduce((acc, curr) => acc + (curr.technical_score || 0), 0) / completed.length)
-    : 83;
-
-  const avgAns = completed.length
-    ? Math.round(completed.reduce((acc, curr) => acc + (curr.answer_quality_score || 0), 0) / completed.length)
-    : 80;
-
-  const scoreCards: ScoreCardData[] = [
-    {
-      title: 'Communication',
-      score: avgComm,
-      max_score: 100,
-      status: avgComm >= 80 ? 'Excellent' : 'Good',
-      description: 'Clarity, structural coherence, and verbal conciseness across spoken answers.',
-    },
-    {
-      title: 'Body Language',
-      score: avgBody,
-      max_score: 100,
-      status: avgBody >= 80 ? 'Excellent' : 'Good',
-      description: 'Webcam eye contact stability, posture uprightness, and natural gesture flow.',
-    },
-    {
-      title: 'Speech & Vocalics',
-      score: avgSpeech,
-      max_score: 100,
-      status: avgSpeech >= 80 ? 'Excellent' : 'Good',
-      description: 'Word pacing (WPM cadence), low filler word density, and pause control.',
-    },
-    {
-      title: 'Answer Quality',
-      score: avgAns,
-      max_score: 100,
-      status: avgAns >= 80 ? 'Excellent' : 'Good',
-      description: 'Relevance to the prompt, logical reasoning flow, and grammar accuracy.',
-    },
-    {
-      title: 'Technical Acumen',
-      score: avgTech,
-      max_score: 100,
-      status: avgTech >= 80 ? 'Excellent' : 'Good',
-      description: 'Depth in DSA, System Design, Operating Systems, and DBMS concepts.',
-    },
-    {
-      title: 'Confidence Index',
-      score: Math.round((avgComm + avgBody) / 2),
-      max_score: 100,
-      status: Math.round((avgComm + avgBody) / 2) >= 80 ? 'Excellent' : 'Good',
-      description: 'Multimodal delivery certainty estimated from steady gaze and steady pacing.',
-    },
+  // Averages over real sessions only. With nothing completed, nothing is claimed.
+  const breakdown = [
+    { label: 'Communication', value: average(completed.map((i) => i.communication_score || 0)) },
+    { label: 'Body language', value: average(completed.map((i) => i.body_language_score || 0)) },
+    { label: 'Speech and pacing', value: average(completed.map((i) => i.speech_score || 0)) },
+    { label: 'Answer quality', value: average(completed.map((i) => i.answer_quality_score || 0)) },
+    { label: 'Technical depth', value: average(completed.map((i) => i.technical_score || 0)) },
   ];
 
+  const liveContest = contests.find((c) => c.status === 'live');
+  const inProgress = interviews.find((i) => i.status === 'in_progress');
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 py-10 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
-      {/* Top Banner */}
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 pb-8 border-b border-slate-800">
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10">
+      <header className="border-b border-line pb-6 mb-8 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2 text-indigo-400 text-xs font-semibold mb-1">
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>AI PERFORMANCE DASHBOARD</span>
-          </div>
-          <h1 className="text-3xl font-bold tracking-tight text-white">
-            Hello, {user ? user.name : 'Candidate'}
+          <h1 className="signage text-4xl sm:text-5xl text-chalk">
+            {user ? user.name.split(' ')[0] : 'Candidate'}
           </h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Track your multimodal interview trajectory, visual poise, and verbal precision.
+          <p className="text-sm text-mute mt-2">
+            {user?.target_company
+              ? `Preparing for ${user.target_company}${user.target_role ? `, ${user.target_role}` : ''}`
+              : 'No target company set yet'}
           </p>
         </div>
-
-        <Link
-          to="/setup"
-          className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold shadow-lg shadow-indigo-600/25 transition-all hover:scale-[1.02]"
-        >
-          <Video className="w-4 h-4" />
-          Start New Interview
-        </Link>
-      </div>
+        <div className="flex items-center gap-2">
+          <Link
+            to="/setup"
+            className="px-4 py-2 bg-sodium-500 hover:bg-sodium-400 text-ink font-semibold text-sm rounded-control transition-colors"
+          >
+            New session
+          </Link>
+          {inProgress && (
+            <Link
+              to={`/interview/${inProgress.id}`}
+              className="px-4 py-2 border border-sodium-600/50 text-sodium-300 text-sm rounded-control hover:border-sodium-500 transition-colors"
+            >
+              Resume session
+            </Link>
+          )}
+        </div>
+      </header>
 
       {error && (
-        <div className="my-6 p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center gap-3 text-red-400 text-sm">
-          <AlertCircle className="w-5 h-5 shrink-0" />
+        <div className="mb-6 flex items-start gap-3 border border-peak-600/40 bg-peak-600/10 p-3.5 rounded-control text-sm text-peak-200">
+          <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
           <span>{error}</span>
         </div>
       )}
 
-      {/* Main Stats Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 my-8">
-        {/* Overall Score Showcase */}
-        <div className="bg-gradient-to-br from-indigo-950/40 via-slate-900 to-slate-900 border border-indigo-500/30 rounded-2xl p-7 shadow-xl flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between mb-4">
-              <span className="text-xs font-semibold uppercase tracking-wider text-indigo-400">
-                Composite Mastery Score
-              </span>
-              <Award className="w-5 h-5 text-indigo-400" />
-            </div>
+      {loading ? (
+        <p className="text-sm text-mute">Loading your sessions…</p>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_20rem] gap-8 items-start">
+          <div className="space-y-8">
+            {/* Measured breakdown, or an invitation if there is nothing yet */}
+            <section className="panel p-6">
+              <div className="flex items-baseline justify-between gap-4">
+                <h2 className="text-sm font-semibold text-chalk">How you are performing</h2>
+                {hasData && (
+                  <span className="text-xs text-mute">
+                    across <span className="readout">{completed.length}</span> completed{' '}
+                    {completed.length === 1 ? 'session' : 'sessions'}
+                  </span>
+                )}
+              </div>
 
-            <div className="flex items-baseline gap-2 mt-2">
-              <span className="text-6xl font-extrabold tracking-tight text-white">{avgOverall}</span>
-              <span className="text-base text-slate-400 font-medium">/ 100</span>
-            </div>
+              {hasData ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-5 mt-5">
+                  {breakdown.map((row) => (
+                    <Meter key={row.label} label={row.label} value={row.value ?? 0} />
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-4">
+                  <p className="text-sm text-chalk-dim leading-relaxed max-w-[56ch]">
+                    Nothing measured yet. Finish one session and this fills with your own numbers
+                    rather than a sample.
+                  </p>
+                  <Link
+                    to="/setup"
+                    className="inline-block mt-4 px-4 py-2 border border-line hover:border-mute text-chalk text-sm rounded-control transition-colors"
+                  >
+                    Run your first session
+                  </Link>
+                </div>
+              )}
+            </section>
 
-            <p className="text-xs text-slate-300 mt-3 leading-relaxed">
-              Based on {completed.length} completed mock sessions analyzed across vision, audio acoustics, and answer substance.
-            </p>
-          </div>
+            {completed.length > 1 && (
+              <section className="panel p-6">
+                <h2 className="text-sm font-semibold text-chalk mb-4">Session by session</h2>
+                <SessionComparisonChart interviews={completed.slice(0, 8).reverse()} />
+              </section>
+            )}
 
-          <div className="mt-6 pt-5 border-t border-slate-800/80 flex items-center justify-between text-xs">
-            <span className="text-slate-400">Target Benchmark: 85+</span>
-            <span className="text-emerald-400 font-medium flex items-center gap-1">
-              <TrendingUp className="w-3.5 h-3.5" /> High readiness
-            </span>
-          </div>
-        </div>
+            {/* Recent sessions as spec rows, not cards */}
+            <section className="panel">
+              <div className="flex items-baseline justify-between gap-4 px-6 pt-6 pb-3">
+                <h2 className="text-sm font-semibold text-chalk">Recent sessions</h2>
+                <Link to="/history" className="text-xs text-sodium-300 hover:underline">
+                  All sessions
+                </Link>
+              </div>
 
-        {/* Session Progression Comparison Chart */}
-        <div className="lg:col-span-2 bg-slate-900/80 border border-slate-800 rounded-2xl p-7 shadow-xl">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="text-base font-semibold text-white">Interview Progression Trajectory</h3>
-              <p className="text-xs text-slate-400 mt-0.5">Overall composite score progression over recent sessions</p>
-            </div>
-            <span className="text-xs text-indigo-400 font-medium bg-indigo-500/10 px-2.5 py-1 rounded-md border border-indigo-500/20">
-              Recharts Analytics
-            </span>
-          </div>
-          <SessionComparisonChart
-            interviews={
-              completed.length > 0
-                ? completed
-                : [
-                    { id: 1, started_at: '2026-10-01', overall_score: 64 },
-                    { id: 2, started_at: '2026-10-02', overall_score: 71 },
-                    { id: 3, started_at: '2026-10-03', overall_score: 78 },
-                    { id: 4, started_at: '2026-10-04', overall_score: 84 },
-                  ]
-            }
-          />
-        </div>
-      </div>
-
-      {/* Six Granular Score Cards */}
-      <div className="mb-10">
-        <h3 className="text-lg font-bold text-white mb-4">Multimodal Performance Breakdown</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-          {scoreCards.map((card, i) => (
-            <ScoreCard key={i} card={card} />
-          ))}
-        </div>
-      </div>
-
-      {/* Recent Interviews List */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-7 shadow-xl">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h3 className="text-lg font-bold text-white">Recent Interview Sessions</h3>
-            <p className="text-xs text-slate-400 mt-0.5">Click any session to view the full multimodal report</p>
-          </div>
-          <Link
-            to="/history"
-            className="text-xs font-semibold text-indigo-400 hover:text-indigo-300 flex items-center gap-1"
-          >
-            View All History <ArrowRight className="w-3.5 h-3.5" />
-          </Link>
-        </div>
-
-        {loading ? (
-          <div className="py-12 text-center text-slate-500 text-sm">Loading sessions...</div>
-        ) : interviews.length === 0 ? (
-          <div className="py-12 text-center text-slate-500 text-sm">
-            <Video className="w-10 h-10 mx-auto text-slate-600 mb-2" />
-            <p>No interview sessions yet.</p>
-            <Link
-              to="/setup"
-              className="inline-block mt-3 text-xs text-indigo-400 font-semibold hover:underline"
-            >
-              Start your first AI mock interview &rarr;
-            </Link>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="text-slate-400 border-b border-slate-800 uppercase tracking-wider text-[10px]">
-                <tr>
-                  <th className="pb-3 font-semibold">Track & Mode</th>
-                  <th className="pb-3 font-semibold">Difficulty</th>
-                  <th className="pb-3 font-semibold">Status</th>
-                  <th className="pb-3 font-semibold">Overall Score</th>
-                  <th className="pb-3 font-semibold">Date</th>
-                  <th className="pb-3 font-semibold text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/60 text-slate-300">
-                {interviews.slice(0, 5).map((item) => (
-                  <tr key={item.id} className="hover:bg-slate-800/30 transition-colors">
-                    <td className="py-3.5 font-medium text-white capitalize">
-                      {item.type} ({item.mode})
-                    </td>
-                    <td className="py-3.5 capitalize text-slate-400">{item.difficulty}</td>
-                    <td className="py-3.5">
-                      <span
-                        className={`px-2 py-0.5 rounded-full font-medium ${
-                          item.status === 'completed'
-                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                            : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                        }`}
-                      >
-                        {item.status}
-                      </span>
-                    </td>
-                    <td className="py-3.5 font-semibold text-white">
-                      {item.overall_score ? `${Math.round(item.overall_score)} / 100` : 'Pending'}
-                    </td>
-                    <td className="py-3.5 text-slate-500">
-                      {new Date(item.started_at).toLocaleDateString()}
-                    </td>
-                    <td className="py-3.5 text-right">
-                      {item.status === 'completed' ? (
-                        <Link
-                          to={`/report/${item.id}`}
-                          className="inline-flex items-center gap-1 text-indigo-400 hover:text-indigo-300 font-medium"
+              {interviews.length === 0 ? (
+                <p className="px-6 pb-6 text-sm text-mute">No sessions recorded yet.</p>
+              ) : (
+                <div className="divide-y divide-line">
+                  {interviews.slice(0, 6).map((session) => (
+                    <Link
+                      key={session.id}
+                      to={session.status === 'completed' ? `/report/${session.id}` : `/interview/${session.id}`}
+                      className="flex items-center justify-between gap-4 px-6 py-3.5 hover:bg-steel/40 transition-colors"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm text-chalk truncate">
+                          {session.type === 'hr' ? 'HR round' : 'Technical round'}
+                          {session.target_company ? `, ${session.target_company}` : ''}
+                          {session.contest_id ? ', contest' : ''}
+                        </p>
+                        <p className="text-[11px] text-mute">
+                          {new Date(session.started_at).toLocaleDateString()}, {session.difficulty},{' '}
+                          {session.mode}
+                        </p>
+                      </div>
+                      {session.status === 'completed' ? (
+                        <span
+                          className={`readout text-base shrink-0 ${
+                            (session.overall_score || 0) >= 70 ? 'text-good-300' : 'text-flag-300'
+                          }`}
                         >
-                          View Report <ExternalLink className="w-3 h-3" />
-                        </Link>
+                          {session.overall_score?.toFixed(1)}
+                        </span>
                       ) : (
-                        <Link
-                          to={`/interview/${item.id}`}
-                          className="inline-flex items-center gap-1 text-emerald-400 hover:text-emerald-300 font-medium"
-                        >
-                          Resume <ArrowRight className="w-3 h-3" />
-                        </Link>
+                        <Chip signal="flag">open</Chip>
                       )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </section>
           </div>
-        )}
-      </div>
+
+          {/* Standing, contest and practice rail */}
+          <aside className="space-y-6">
+            {rating && (
+              <section className="panel p-5">
+                <h2 className="text-sm font-semibold text-chalk">Your rating</h2>
+                <div className="flex items-end justify-between gap-3 mt-2">
+                  <span className="readout text-5xl text-sodium-300 leading-none">{rating.rating}</span>
+                  <Chip signal={TIER_SIGNAL[rating.tier] || 'neutral'}>{rating.tier}</Chip>
+                </div>
+                <div className="mt-4 space-y-1">
+                  <SpecRow label="Sessions" value={rating.sessions_completed} />
+                  <SpecRow label="Best" value={rating.best_score ?? '--'} signal="good" />
+                  <SpecRow label="Contests" value={rating.contests_entered} />
+                </div>
+                <Link to="/scoreboard" className="inline-block mt-4 text-xs text-sodium-300 hover:underline">
+                  See the scoreboard
+                </Link>
+              </section>
+            )}
+
+            {liveContest && (
+              <section className="panel p-5">
+                <div className="flex items-center justify-between gap-2">
+                  <h2 className="text-sm font-semibold text-chalk">Open contest</h2>
+                  <Chip signal={liveContest.kind === 'weekly' ? 'sodium' : 'cool'}>
+                    {liveContest.kind === 'weekly' ? 'Weekly' : 'Daily'}
+                  </Chip>
+                </div>
+                <p className="signage-tight text-xl text-chalk mt-2 leading-tight">
+                  {liveContest.title}
+                </p>
+                <p className="text-xs text-mute mt-1.5">
+                  <span className="readout">{liveContest.question_count}</span> questions,{' '}
+                  <span className="readout">{liveContest.participants}</span> entered
+                </p>
+                <Link
+                  to="/contests"
+                  className="inline-block mt-4 px-3.5 py-2 bg-sodium-500 hover:bg-sodium-400 text-ink text-sm font-semibold rounded-control transition-colors"
+                >
+                  {liveContest.joined ? 'Open contest' : 'Enter contest'}
+                </Link>
+              </section>
+            )}
+
+            <section className="panel p-5">
+              <h2 className="text-sm font-semibold text-chalk">Speaking practice</h2>
+              {practice && practice.attempts > 0 ? (
+                <>
+                  <div className="flex items-end gap-2 mt-2">
+                    <span className="readout text-4xl text-sodium-300 leading-none">
+                      {practice.latest_score ?? 0}
+                    </span>
+                    <span className="text-xs text-mute">latest fluency</span>
+                  </div>
+                  <div className="mt-4 space-y-1">
+                    <SpecRow label="Drills" value={practice.attempts} />
+                    <SpecRow label="Best" value={practice.best_score ?? '--'} signal="good" />
+                  </div>
+                </>
+              ) : (
+                <p className="text-xs text-mute mt-2 leading-relaxed">
+                  Short drills that score your English fluency from what you said, so you can work on
+                  delivery without burning a full session.
+                </p>
+              )}
+              <Link to="/speaking" className="inline-block mt-4 text-xs text-sodium-300 hover:underline">
+                Open a drill
+              </Link>
+            </section>
+          </aside>
+        </div>
+      )}
     </div>
   );
 };

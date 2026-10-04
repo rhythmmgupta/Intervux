@@ -8,6 +8,7 @@ from app.models.question import Question
 from app.schemas.response import ResponseCreate, ResponseOut
 from app.api.auth import get_current_user
 from app.services.interview_service import interview_service, QUESTION_BANK
+from app.services.company_service import company_service
 
 router = APIRouter(prefix="/api", tags=["Questions & Responses"])
 
@@ -20,6 +21,31 @@ def get_question_bank(category: Optional[str] = None, difficulty: Optional[str] 
     if difficulty:
         filtered = [q for q in filtered if q["difficulty"].lower() == difficulty.lower()]
     return filtered
+
+@router.get("/companies")
+def list_companies(tier: Optional[str] = None):
+    """Target companies a candidate can aim at, with the roles each hires for."""
+    return company_service.list_companies(tier=tier)
+
+
+@router.get("/companies/{slug}")
+def get_company(slug: str, interview_type: str = "technical", difficulty: str = "medium", limit: int = 5):
+    """One company's profile plus a sample round for the given track and difficulty."""
+    company = company_service.get_company(slug)
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found.")
+
+    return {
+        "slug": company["slug"],
+        "name": company["name"],
+        "tier": company["tier"],
+        "roles": company["roles"],
+        "focus": company["focus"],
+        "sample_questions": company_service.select_questions(
+            slug=slug, interview_type=interview_type, difficulty=difficulty, limit=limit
+        ),
+    }
+
 
 @router.post("/responses", response_model=ResponseOut, status_code=status.HTTP_201_CREATED)
 def submit_response(

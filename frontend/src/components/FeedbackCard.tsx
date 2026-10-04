@@ -10,16 +10,16 @@ export const FeedbackCard: React.FC<FeedbackCardProps> = ({ tip, onDismiss }) =>
   if (!tip) return null;
 
   return (
-    <div className="bg-gradient-to-r from-amber-500/15 via-indigo-500/15 to-purple-500/15 border border-amber-500/30 rounded-xl p-4 shadow-xl backdrop-blur-md flex items-center justify-between gap-3 animate-fade-in transition-all">
+    <div className="bg-gradient-to-r from-flag-500/15 via-sodium-500/15 to-sodium-500/15 border border-flag-500/30 rounded-control p-4 backdrop-blur-md flex items-center justify-between gap-3 animate-fade-in transition-all">
       <div className="flex items-center gap-3">
-        <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/30">
+        <div className="w-8 h-8 rounded-control bg-flag-500/20 text-flag-400 flex items-center justify-center shrink-0 border border-flag-500/30">
           <Lightbulb className="w-4 h-4" />
         </div>
         <div>
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-amber-400 block">
+          <span className="text-[11px] font-semibold text-flag-400 block">
             Practice Coaching Tip
           </span>
-          <p className="text-sm font-medium text-slate-100 mt-0.5 leading-snug">
+          <p className="text-sm font-medium text-chalk mt-0.5 leading-snug">
             {tip}
           </p>
         </div>
@@ -28,7 +28,7 @@ export const FeedbackCard: React.FC<FeedbackCardProps> = ({ tip, onDismiss }) =>
       {onDismiss && (
         <button
           onClick={onDismiss}
-          className="text-slate-400 hover:text-white p-1 rounded-md hover:bg-slate-800/60 transition-colors shrink-0"
+          className="text-mute hover:text-chalk p-1 rounded-control hover:bg-steel/60 transition-colors shrink-0"
         >
           <X className="w-4 h-4" />
         </button>

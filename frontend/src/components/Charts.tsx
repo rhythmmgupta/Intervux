@@ -24,7 +24,7 @@ interface PerformanceTimelineProps {
 export const PerformanceTimelineChart: React.FC<PerformanceTimelineProps> = ({ data }) => {
   if (!data || data.length === 0) {
     return (
-      <div className="h-64 flex items-center justify-center text-sm text-slate-500">
+      <div className="h-64 flex items-center justify-center text-sm text-mute">
         No timeline progression data available yet.
       </div>
     );
@@ -42,29 +42,29 @@ export const PerformanceTimelineChart: React.FC<PerformanceTimelineProps> = ({ d
     <div className="w-full h-72">
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={chartData} margin={{ top: 10, right: 20, left: -10, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-          <XAxis dataKey="name" stroke="#64748b" tick={{ fontSize: 12 }} />
-          <YAxis stroke="#64748b" domain={[0, 100]} tick={{ fontSize: 12 }} />
+          <CartesianGrid strokeDasharray="3 3" stroke="#28332e" vertical={false} />
+          <XAxis dataKey="name" stroke="#869089" tick={{ fontSize: 12 }} />
+          <YAxis stroke="#869089" domain={[0, 100]} tick={{ fontSize: 12 }} />
           <Tooltip
-            contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '12px' }}
+            contentStyle={{ backgroundColor: '#0c100f', borderColor: '#28332e', borderRadius: '12px' }}
             itemStyle={{ fontSize: '12px' }}
           />
           <Line
             type="monotone"
             dataKey="score"
             name="Answer Score"
-            stroke="#6366f1"
+            stroke="#eaa94a"
             strokeWidth={3}
-            dot={{ fill: '#6366f1', r: 5 }}
+            dot={{ fill: '#eaa94a', r: 5 }}
             activeDot={{ r: 7 }}
           />
           <Line
             type="monotone"
             dataKey="eyeContact"
             name="Eye Contact %"
-            stroke="#10b981"
+            stroke="#6dbd8d"
             strokeWidth={2}
-            dot={{ fill: '#10b981', r: 4 }}
+            dot={{ fill: '#6dbd8d', r: 4 }}
           />
         </LineChart>
       </ResponsiveContainer>
@@ -81,18 +81,18 @@ export const MultimodalRadarChart: React.FC<MultimodalRadarProps> = ({ data }) =
     <div className="w-full h-72">
       <ResponsiveContainer width="100%" height="100%">
         <RadarChart cx="50%" cy="50%" outerRadius="75%" data={data}>
-          <PolarGrid stroke="#334155" />
-          <PolarAngleAxis dataKey="subject" tick={{ fill: '#94a3b8', fontSize: 11 }} />
-          <PolarRadiusAxis angle={30} domain={[0, 100]} stroke="#475569" />
+          <PolarGrid stroke="#28332e" />
+          <PolarAngleAxis dataKey="subject" tick={{ fill: '#bdc4ba', fontSize: 11 }} />
+          <PolarRadiusAxis angle={30} domain={[0, 100]} stroke="#28332e" />
           <Radar
             name="Candidate"
             dataKey="A"
-            stroke="#8b5cf6"
-            fill="#8b5cf6"
+            stroke="#eaa94a"
+            fill="#eaa94a"
             fillOpacity={0.4}
           />
           <Tooltip
-            contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '12px' }}
+            contentStyle={{ backgroundColor: '#0c100f', borderColor: '#28332e', borderRadius: '12px' }}
           />
         </RadarChart>
       </ResponsiveContainer>
@@ -114,13 +114,13 @@ export const SpeechSpeedChart: React.FC<SpeechSpeedChartProps> = ({ data }) => {
     <div className="w-full h-64">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={chartData} margin={{ top: 10, right: 20, left: -10, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-          <XAxis dataKey="name" stroke="#64748b" tick={{ fontSize: 12 }} />
-          <YAxis stroke="#64748b" tick={{ fontSize: 12 }} />
+          <CartesianGrid strokeDasharray="3 3" stroke="#28332e" vertical={false} />
+          <XAxis dataKey="name" stroke="#869089" tick={{ fontSize: 12 }} />
+          <YAxis stroke="#869089" tick={{ fontSize: 12 }} />
           <Tooltip
-            contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '12px' }}
+            contentStyle={{ backgroundColor: '#0c100f', borderColor: '#28332e', borderRadius: '12px' }}
           />
-          <Bar dataKey="wpm" name="Speaking Rate (WPM)" fill="#38bdf8" radius={[6, 6, 0, 0]} />
+          <Bar dataKey="wpm" name="Speaking Rate (WPM)" fill="#68999f" radius={[6, 6, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </div>
@@ -144,19 +144,19 @@ export const SessionComparisonChart: React.FC<SessionComparisonProps> = ({ inter
     <div className="w-full h-64">
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={chartData} margin={{ top: 10, right: 20, left: -10, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-          <XAxis dataKey="session" stroke="#64748b" tick={{ fontSize: 12 }} />
-          <YAxis stroke="#64748b" domain={[0, 100]} tick={{ fontSize: 12 }} />
+          <CartesianGrid strokeDasharray="3 3" stroke="#28332e" vertical={false} />
+          <XAxis dataKey="session" stroke="#869089" tick={{ fontSize: 12 }} />
+          <YAxis stroke="#869089" domain={[0, 100]} tick={{ fontSize: 12 }} />
           <Tooltip
-            contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '12px' }}
+            contentStyle={{ backgroundColor: '#0c100f', borderColor: '#28332e', borderRadius: '12px' }}
           />
           <Line
             type="monotone"
             dataKey="score"
             name="Overall Score"
-            stroke="#a855f7"
+            stroke="#eaa94a"
             strokeWidth={3}
-            dot={{ fill: '#a855f7', r: 5 }}
+            dot={{ fill: '#eaa94a', r: 5 }}
             activeDot={{ r: 7 }}
           />
         </LineChart>

@@ -6,6 +6,18 @@ from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
+# Gaze calibration. The eye band is expressed as a fraction of the detected head
+# box height, and the bias terms absorb the systematic offset left by a given
+# webcam height and lens. Tune these per deployment rather than per frame:
+# park the candidate looking straight at the lens and nudge the biases until
+# gaze_offset_x / gaze_offset_y read ~0.
+EYE_BAND = (0.25, 0.55)
+GAZE_BIAS_X = 0.0
+GAZE_BIAS_Y = 0.0
+# Pupils past these offsets count as looking away from the lens.
+GAZE_THRESHOLD_X = 0.18
+GAZE_THRESHOLD_Y = 0.20
+
 class VisionService:
     """
     Analyzes visual behavioral signals from webcam frames using OpenCV and MediaPipe.
@@ -24,11 +36,13 @@ class VisionService:
         self.prev_gray: Optional[np.ndarray] = None
         self.frame_count: int = 0
         self.metrics_history: list[Dict[str, Any]] = []
+        self.face_centers: list[tuple[float, float]] = []
 
     def reset_session(self):
         self.prev_gray = None
         self.frame_count = 0
         self.metrics_history = []
+        self.face_centers = []
 
     def decode_frame(self, frame_data: str) -> Optional[np.ndarray]:
         """Decode base64 encoded image frame into OpenCV BGR numpy array."""
@@ -43,9 +57,14 @@ class VisionService:
             logger.warning(f"Failed to decode frame: {e}")
             return None
 
-    def analyze_frame(self, frame: np.ndarray) -> Dict[str, Any]:
+    def analyze_frame(self, frame: np.ndarray, record: bool = True) -> Dict[str, Any]:
         """
         Analyze a single video frame.
+
+        `record=False` analyses the frame for the live readout without adding it
+        to the session history. The client samples continuously so the meters stay
+        alive between questions, and only frames captured while the candidate is
+        actually answering belong in that answer's aggregate.
         Returns observable metrics:
         - face_detected: bool
         - eye_contact: float (0-100%)
@@ -74,20 +93,22 @@ class VisionService:
 
         # Find largest face-like contour in top half
         contours, _ = cv2.findContours(skin_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        face_contour = None
-        max_area = 0
         min_face_area = (h * w) * 0.02 # at least 2% of frame
 
+        candidates = []
         for cnt in contours:
             area = cv2.contourArea(cnt)
-            if area > min_face_area and area > max_area:
+            if area > min_face_area:
                 x, y, cw, ch = cv2.boundingRect(cnt)
                 aspect_ratio = float(ch) / cw if cw > 0 else 0
                 # Faces typically have vertical aspect ratio roughly 1.0 to 1.8
                 if 0.7 <= aspect_ratio <= 2.2 and y < h * 0.7:
-                    max_area = area
-                    face_contour = (x, y, cw, ch)
+                    candidates.append((area, (x, y, cw, ch)))
 
+        candidates.sort(key=lambda c: c[0], reverse=True)
+        face_contour = candidates[0][1] if candidates else None
+        # A second face-sized skin region usually means another person is in frame.
+        person_count = len(candidates)
         face_detected = face_contour is not None
 
         if face_detected:
@@ -125,9 +146,26 @@ class VisionService:
                 head_orientation = "Looking up"
                 alignment_factor = 0.65
 
-            # Eye contact estimation
-            # Centered gaze + upright posture yields higher estimated eye contact
-            eye_contact = round(min(96.0, max(25.0, alignment_factor * 85.0 + (np.random.uniform(-3, 3)))), 1)
+            # Eye contact estimation from measured pupil offset inside the eye band
+            gaze = self._estimate_gaze(gray, face_contour)
+            if gaze is None:
+                gaze_x, gaze_y = 0.0, 0.0
+                gaze_penalty = 0.45  # eyes not resolvable at this framing/lighting
+                gaze_direction = "Eyes not resolvable"
+            else:
+                gaze_x, gaze_y = gaze
+                gaze_penalty = min(1.0, (abs(gaze_x) / 0.30 + abs(gaze_y) / 0.35) / 2.0)
+                if abs(gaze_x) > GAZE_THRESHOLD_X:
+                    gaze_direction = "Eyes left of lens" if gaze_x < 0 else "Eyes right of lens"
+                elif gaze_y > GAZE_THRESHOLD_Y:
+                    gaze_direction = "Eyes down (reading something)"
+                elif gaze_y < -GAZE_THRESHOLD_Y:
+                    gaze_direction = "Eyes up"
+                else:
+                    gaze_direction = "On camera"
+
+            eye_contact = round(min(96.0, max(10.0, alignment_factor * 95.0 * (1.0 - 0.55 * gaze_penalty))), 1)
+            looking_away = bool(gaze_penalty > 0.55 or alignment_factor < 0.6)
 
             # Posture estimation based on face elevation and centering
             # Ideal webcam position has face in upper third to middle of frame
@@ -140,6 +178,14 @@ class VisionService:
                 posture_score = max(40.0, 85.0 - slouch_penalty)
             else:
                 posture_score = 75.0 # Too high in frame
+            # Posture stability: drift of the head centre across the session so far
+            if record:
+                self.face_centers.append((face_center_x / float(w), face_center_y / float(h)))
+            if len(self.face_centers) >= 3:
+                recent = self.face_centers[-20:]
+                drift = float(np.std([c[0] for c in recent]) + np.std([c[1] for c in recent]))
+                stability = max(0.0, 100.0 - drift * 600.0)
+                posture_score = posture_score * 0.6 + stability * 0.4
             posture_score = round(posture_score, 1)
 
         else:
@@ -148,10 +194,22 @@ class VisionService:
             eye_contact = 20.0
             head_orientation = "Not clearly detected"
             posture_score = 45.0
+            gaze_x = gaze_y = 0.0
+            gaze_direction = "Face not in frame"
+            looking_away = True
 
         # 2. Gesture / Hand Movement Activity via Frame Differencing
         gesture_score = 70.0 # Default baseline
-        if self.prev_gray is not None:
+        background_motion = 0.0
+        if self.prev_gray is not None and self.prev_gray.shape == gray.shape:
+            # Motion outside the candidate's own head region = something moving behind them
+            bg_diff = cv2.absdiff(gray, self.prev_gray)
+            if face_detected:
+                x, y, cw, ch = face_contour
+                bg_diff[max(0, y - 10):y + ch + 10, max(0, x - 10):x + cw + 10] = 0
+            _, bg_thresh = cv2.threshold(bg_diff, 30, 255, cv2.THRESH_BINARY)
+            background_motion = round(cv2.countNonZero(bg_thresh) / float(h * w) * 100.0, 2)
+        if self.prev_gray is not None and self.prev_gray.shape == gray.shape:
             # Check motion delta in lower half of frame where hand gestures occur
             lower_h = int(h * 0.5)
             diff = cv2.absdiff(gray[lower_h:, :], self.prev_gray[lower_h:, :])
@@ -169,8 +227,12 @@ class VisionService:
                 # Very still / minimal gesture
                 gesture_score = 65.0
 
+        # prev_gray always advances: motion differencing needs the previous frame
+        # whether or not this one is being recorded. The count is of recorded
+        # frames only, since that is what the aggregate is built from.
         self.prev_gray = gray.copy()
-        self.frame_count += 1
+        if record:
+            self.frame_count += 1
 
         metric = {
             "face_detected": face_detected,
@@ -178,11 +240,61 @@ class VisionService:
             "face_visibility": float(face_visibility),
             "head_orientation": str(head_orientation),
             "posture_score": float(posture_score),
-            "gesture_score": float(round(gesture_score, 1))
+            "gesture_score": float(round(gesture_score, 1)),
+            "gaze_direction": str(gaze_direction),
+            "gaze_offset_x": round(float(gaze_x), 3),
+            "gaze_offset_y": round(float(gaze_y), 3),
+            "looking_away": bool(looking_away),
+            "person_count": int(person_count),
+            "background_motion": float(background_motion)
         }
 
-        self.metrics_history.append(metric)
+        if record:
+            self.metrics_history.append(metric)
         return metric
+
+    def _estimate_gaze(self, gray: np.ndarray, face_box: tuple) -> Optional[tuple[float, float]]:
+        """
+        Measure pupil position inside each eye socket and return the mean offset
+        from the socket centre, as (x, y) in roughly -0.5..0.5.
+        Negative x = pupils toward image-left, positive y = pupils downward.
+
+        ponytail: pupil = darkest blob in the eye band, which is cheap and
+        model-free but drifts under harsh side lighting or heavy glasses glare.
+        Upgrade path: MediaPipe FaceLandmarker iris landmarks (needs the
+        face_landmarker.task model file downloaded at startup).
+        """
+        x, y, cw, ch = face_box
+        top, bottom = y + int(EYE_BAND[0] * ch), y + int(EYE_BAND[1] * ch)
+        top, bottom = max(0, top), min(gray.shape[0], bottom)
+        left, right = max(0, x), min(gray.shape[1], x + cw)
+        if bottom - top < 6 or right - left < 20:
+            return None
+
+        band = cv2.GaussianBlur(gray[top:bottom, left:right], (5, 5), 0)
+        bh, bw = band.shape
+        offsets = []
+        # Inset the outer edges: hair and ear shadows are darker than any pupil.
+        for x0, x1 in ((int(bw * 0.10), bw // 2), (bw // 2, int(bw * 0.90))):
+            roi = band[:, x0:x1]
+            if roi.shape[1] < 6:
+                continue
+            # Centroid of the darkest blob, not the single darkest pixel: a pupil is
+            # a flat dark disc, so argmin lands on whichever edge it scans first.
+            darkest = float(roi.min())
+            dark_mask = cv2.inRange(roi, darkest, darkest + 25.0)
+            m = cv2.moments(dark_mask, binaryImage=True)
+            if m["m00"] <= 0:
+                continue
+            px, py = m["m10"] / m["m00"], m["m01"] / m["m00"]
+            offsets.append((px / float(roi.shape[1] - 1) - 0.5, py / float(roi.shape[0] - 1) - 0.5))
+
+        if not offsets:
+            return None
+        return (
+            sum(o[0] for o in offsets) / len(offsets) - GAZE_BIAS_X,
+            sum(o[1] for o in offsets) / len(offsets) - GAZE_BIAS_Y,
+        )
 
     def get_aggregate_metrics(self) -> Dict[str, Any]:
         """Aggregate all analyzed frames for the current response/session."""
@@ -204,7 +316,18 @@ class VisionService:
             "head_orientation": most_common_orientation,
             "posture_score": round(avg_posture, 1),
             "gesture_score": round(avg_gesture, 1),
-            "frame_count": self.frame_count
+            "frame_count": self.frame_count,
+            "looking_away_ratio": round(
+                sum(1 for m in self.metrics_history if m.get("looking_away")) / len(self.metrics_history) * 100.0, 1
+            ),
+            "max_person_count": max(m.get("person_count", 1) for m in self.metrics_history),
+            "avg_background_motion": round(
+                sum(m.get("background_motion", 0.0) for m in self.metrics_history) / len(self.metrics_history), 2
+            ),
+            "gaze_direction": max(
+                set(m.get("gaze_direction", "On camera") for m in self.metrics_history),
+                key=[m.get("gaze_direction", "On camera") for m in self.metrics_history].count
+            )
         }
 
     def _default_metrics(self) -> Dict[str, Any]:
@@ -214,7 +337,16 @@ class VisionService:
             "head_orientation": "Mostly centered",
             "posture_score": 82.0,
             "gesture_score": 75.0,
-            "frame_count": 0
+            "frame_count": 0,
+            "gaze_direction": "On camera",
+            "gaze_offset_x": 0.0,
+            "gaze_offset_y": 0.0,
+            "looking_away": False,
+            "person_count": 1,
+            "background_motion": 0.0,
+            "looking_away_ratio": 0.0,
+            "max_person_count": 1,
+            "avg_background_motion": 0.0
         }
 
 vision_service = VisionService()

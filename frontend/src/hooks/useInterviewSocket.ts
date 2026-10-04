@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Question, VisionMetrics } from '../types';
+import { Question, VisionMetrics, IntegrityState } from '../types';
 
 export interface UseInterviewSocketOptions {
   interviewId: number;
@@ -18,9 +18,27 @@ export function useInterviewSocket({ interviewId, onInterviewCompleted, onQuesti
     posture_score: 85,
     gesture_score: 75,
   });
+  const [integrity, setIntegrity] = useState<IntegrityState>({
+    integrity_score: 100,
+    status: 'clean',
+    flags: [],
+    hidden_seconds: 0,
+    event_count: 0,
+  });
   const [coachingTip, setCoachingTip] = useState<string | null>(null);
   const [lastQuestionFeedback, setLastQuestionFeedback] = useState<any | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
+  const retryRef = useRef<number>(0);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Callers pass these as inline arrow functions, so their identity changes every
+  // render. Holding them in a ref keeps them out of the effect's dependencies:
+  // with them in, the effect tore down and reopened the socket on every render,
+  // and because the effect sets state, that loop never stopped.
+  const handlersRef = useRef({ onInterviewCompleted, onQuestionStarted });
+  useEffect(() => {
+    handlersRef.current = { onInterviewCompleted, onQuestionStarted };
+  }, [onInterviewCompleted, onQuestionStarted]);
 
   useEffect(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -29,16 +47,20 @@ export function useInterviewSocket({ interviewId, onInterviewCompleted, onQuesti
     const wsHost = isDev ? `${window.location.hostname}:8000` : window.location.host;
     const wsUrl = `${protocol}//${wsHost}/ws/interview/${interviewId}`;
 
-    setConnectionStatus('connecting');
-    const ws = new WebSocket(wsUrl);
-    socketRef.current = ws;
+    let closedByUnmount = false;
 
-    ws.onopen = () => {
-      setIsConnected(true);
-      setConnectionStatus('connected');
-    };
+    const connect = () => {
+      setConnectionStatus('connecting');
+      const ws = new WebSocket(wsUrl);
+      socketRef.current = ws;
 
-    ws.onmessage = (event) => {
+      ws.onopen = () => {
+        retryRef.current = 0;
+        setIsConnected(true);
+        setConnectionStatus('connected');
+      };
+
+      ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
         switch (data.event) {
@@ -48,14 +70,18 @@ export function useInterviewSocket({ interviewId, onInterviewCompleted, onQuesti
           case 'question_started':
             setCurrentQuestion(data.question);
             setCoachingTip(null);
-            if (onQuestionStarted) {
-              onQuestionStarted(data.question);
-            }
+            handlersRef.current.onQuestionStarted?.(data.question);
             break;
 
           case 'video_metrics':
             if (data.metrics) {
               setLiveMetrics((prev) => ({ ...prev, ...data.metrics }));
+            }
+            break;
+
+          case 'integrity_update':
+            if (data.integrity) {
+              setIntegrity(data.integrity);
             }
             break;
 
@@ -74,9 +100,7 @@ export function useInterviewSocket({ interviewId, onInterviewCompleted, onQuesti
             break;
 
           case 'interview_completed':
-            if (onInterviewCompleted) {
-              onInterviewCompleted(data);
-            }
+            handlersRef.current.onInterviewCompleted?.(data);
             break;
 
           case 'error':
@@ -89,34 +113,49 @@ export function useInterviewSocket({ interviewId, onInterviewCompleted, onQuesti
       } catch (err) {
         console.error('Failed to parse WebSocket message:', err);
       }
+      };
+
+      ws.onerror = () => {
+        setConnectionStatus('error');
+      };
+
+      ws.onclose = () => {
+        setIsConnected(false);
+        if (closedByUnmount) return;
+
+        // "Reconnecting" should mean it, so actually retry, backing off to 10s.
+        setConnectionStatus('connecting');
+        const delay = Math.min(10000, 500 * 2 ** retryRef.current);
+        retryRef.current += 1;
+        retryTimerRef.current = setTimeout(connect, delay);
+      };
     };
 
-    ws.onerror = () => {
-      setConnectionStatus('error');
-    };
-
-    ws.onclose = () => {
-      setIsConnected(false);
-      setConnectionStatus('disconnected');
-    };
+    connect();
 
     return () => {
-      ws.close();
+      closedByUnmount = true;
+      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+      socketRef.current?.close();
       socketRef.current = null;
     };
-  }, [interviewId, onInterviewCompleted, onQuestionStarted]);
+  }, [interviewId]);
 
-  const sendVideoFrame = useCallback((frameBase64: string, currentWpm: number = 0) => {
-    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-      socketRef.current.send(
-        JSON.stringify({
-          event: 'video_frame',
-          frame: frameBase64,
-          speaking_speed: currentWpm,
-        })
-      );
-    }
-  }, []);
+  const sendVideoFrame = useCallback(
+    (frameBase64: string, currentWpm: number = 0, isAnswering: boolean = true) => {
+      if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+        socketRef.current.send(
+          JSON.stringify({
+            event: 'video_frame',
+            frame: frameBase64,
+            speaking_speed: currentWpm,
+            is_answering: isAnswering,
+          })
+        );
+      }
+    },
+    []
+  );
 
   const sendAudioChunk = useCallback((volume: number, wpm: number, transcript: string) => {
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
@@ -126,6 +165,18 @@ export function useInterviewSocket({ interviewId, onInterviewCompleted, onQuesti
           volume,
           wpm,
           transcript,
+        })
+      );
+    }
+  }, []);
+
+  const sendIntegrityEvent = useCallback((type: string, detail?: Record<string, unknown>) => {
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(
+        JSON.stringify({
+          event: 'integrity_event',
+          type,
+          detail: detail || {},
         })
       );
     }
@@ -162,9 +213,11 @@ export function useInterviewSocket({ interviewId, onInterviewCompleted, onQuesti
     connectionStatus,
     currentQuestion,
     liveMetrics,
+    integrity,
     coachingTip,
     lastQuestionFeedback,
     sendVideoFrame,
+    sendIntegrityEvent,
     sendAudioChunk,
     completeQuestion,
     requestCompleteInterview,
